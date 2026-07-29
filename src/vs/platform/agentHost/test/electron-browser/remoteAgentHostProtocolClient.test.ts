@@ -30,7 +30,7 @@ import type { IClientTransport, IProtocolTransport } from '../../common/state/se
 import { TestConfigurationService } from '../../../configuration/test/common/testConfigurationService.js';
 import { TelemetryLevel } from '../../../telemetry/common/telemetry.js';
 import { AgentHostCodexAgentEnabledSettingId, AgentHostCodexMultiRootEnabledSettingId, AgentHostCopilotMultiRootEnabledSettingId, AgentHostClaudeMultiRootEnabledSettingId, AgentHostSystemProxyEnabledSettingId } from '../../common/agentService.js';
-import { AgentHostAutoReplyEnabledConfigKey, AgentHostCodexEnabledConfigKey, AgentHostCodexMultiRootEnabledConfigKey, AgentHostCopilotMultiRootEnabledConfigKey, AgentHostClaudeMultiRootEnabledConfigKey, AgentHostDisableRepoInfoTelemetryConfigKey, AgentHostEditTelemetryEnabledConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostSystemProxyEnabledConfigKey, AgentHostTelemetryLevelConfigKey, AgentHostTerminalAutoApproveEnabledConfigKey, AgentHostTerminalAutoApproveRulesConfigKey, AUTO_REPLY_SETTING_ID, DISABLE_REPO_INFO_TELEMETRY_SETTING_ID, EDIT_TELEMETRY_ENABLED_SETTING_ID, telemetryLevelToAgentHostConfigValue, TERMINAL_AUTO_APPROVE_SETTING_ID, TERMINAL_IGNORE_DEFAULT_AUTO_APPROVE_RULES_SETTING_ID, type AgentHostTerminalAutoApproveRules } from '../../common/agentHostSchema.js';
+import { AgentHostAutoReplyEnabledConfigKey, AgentHostCodexEnabledConfigKey, AgentHostCodexMultiRootEnabledConfigKey, AgentHostCopilotMultiRootEnabledConfigKey, AgentHostClaudeMultiRootEnabledConfigKey, AgentHostDisableRepoInfoTelemetryConfigKey, AgentHostEditTelemetryEnabledConfigKey, AgentHostGlobalAutoApproveEnabledConfigKey, AgentHostManagedPermissionsConfigKey, AgentHostSystemProxyEnabledConfigKey, AgentHostTelemetryLevelConfigKey, AgentHostTerminalAutoApproveEnabledConfigKey, AgentHostTerminalAutoApproveRulesConfigKey, AUTO_REPLY_SETTING_ID, DISABLE_REPO_INFO_TELEMETRY_SETTING_ID, EDIT_TELEMETRY_ENABLED_SETTING_ID, GLOBAL_AUTO_APPROVE_SETTING_ID, MANAGED_PERMISSION_TERMINAL_ASK_RULE, telemetryLevelToAgentHostConfigValue, TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID, TERMINAL_AUTO_APPROVE_SETTING_ID, TERMINAL_IGNORE_DEFAULT_AUTO_APPROVE_RULES_SETTING_ID, type AgentHostTerminalAutoApproveRules } from '../../common/agentHostSchema.js';
 import type { Implementation } from '../../common/state/protocol/common/commands.js';
 import { agentsWindowAgentHostClientInfo } from '../../common/agentHostClientInfo.js';
 
@@ -135,6 +135,27 @@ class TerminalAutoApproveConfigurationService extends TestConfigurationService {
 			return this._terminalAutoApproveInspectValue as IConfigurationValue<T>;
 		}
 		return super.inspect<T>(key);
+	}
+}
+
+/**
+ * Supplies `policyValue` (the managed/enterprise value) for the managed
+ * permission source settings so that the managed-permissions forwarding, which
+ * derives EXCLUSIVELY from `inspect(...).policyValue`, can be exercised
+ * independently of ordinary user/workspace values.
+ */
+class ManagedPermissionPolicyConfigurationService extends TestConfigurationService {
+
+	constructor(private readonly _policyValues: Record<string, unknown>) {
+		super();
+	}
+
+	override inspect<T>(key: string): IConfigurationValue<T> {
+		const base = super.inspect<T>(key);
+		if (Object.prototype.hasOwnProperty.call(this._policyValues, key)) {
+			return { ...base, policyValue: this._policyValues[key] as T };
+		}
+		return base;
 	}
 }
 
@@ -892,6 +913,37 @@ suite('RemoteAgentHostProtocolClient', () => {
 				},
 			},
 		});
+	});
+
+	test('derives managed permissions only from policy values and forwards them on connect', async () => {
+		const transport = disposables.add(new TestProtocolTransport());
+		const configurationService = new ManagedPermissionPolicyConfigurationService({
+			[GLOBAL_AUTO_APPROVE_SETTING_ID]: false,
+			[TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID]: false,
+		});
+		const { client } = createClient(transport, undefined, undefined, undefined, configurationService);
+		await connectClient(client, transport);
+
+		const managed = findRootConfigNotification(transport.sentMessages, AgentHostManagedPermissionsConfigKey);
+		assert.deepStrictEqual(getRootConfig(managed)[AgentHostManagedPermissionsConfigKey], {
+			disableBypassPermissionsMode: 'disable',
+			ask: [MANAGED_PERMISSION_TERMINAL_ASK_RULE],
+		});
+	});
+
+	test('forwards undefined managed permissions when only non-policy values are set', async () => {
+		const transport = disposables.add(new TestProtocolTransport());
+		// User/workspace values are restrictive, but no enterprise policy is set —
+		// only `policyValue` maps, so nothing must be forwarded.
+		const configurationService = new TestConfigurationService({
+			[GLOBAL_AUTO_APPROVE_SETTING_ID]: false,
+			[TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID]: false,
+		});
+		const { client } = createClient(transport, undefined, undefined, undefined, configurationService);
+		await connectClient(client, transport);
+
+		const managed = findRootConfigNotification(transport.sentMessages, AgentHostManagedPermissionsConfigKey);
+		assert.strictEqual(getRootConfig(managed)[AgentHostManagedPermissionsConfigKey], undefined);
 	});
 
 	test('forwards codex enablement on connect when the experiment-aware setting is on', async () => {

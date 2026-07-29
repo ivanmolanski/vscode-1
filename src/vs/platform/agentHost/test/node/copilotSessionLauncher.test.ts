@@ -24,6 +24,7 @@ import { ByokLmBridgeRegistry, IByokLmBridgeRegistry } from '../../node/byokLmBr
 import { ByokLmProxyService, IByokLmProxyService, type IByokLmProxyHandle } from '../../node/copilot/byokLmProxyService.js';
 import { CopilotSessionLauncher, getCopilotReasoningEffort, resolveByokSessionConfig, type CopilotSessionLaunchPlan, type ICopilotSessionRuntime } from '../../node/copilot/copilotSessionLauncher.js';
 import type { ICopilotPluginInfo } from '../../node/copilot/copilotAgent.js';
+import { AgentHostManagedPermissionsConfigKey } from '../../common/agentHostSchema.js';
 
 const testRuntime: ICopilotSessionRuntime = {
 	handlePermissionRequest: async () => { throw new Error('Unexpected permission request'); },
@@ -57,6 +58,20 @@ function createTestLauncher(): CopilotSessionLauncher {
 			releaseSessionTraceContext: () => { },
 			withTraceContext: <T>(_context: undefined, fn: () => T): T => fn(),
 		} as unknown as IAgentHostOTelService,
+	);
+}
+
+function createTestLauncherWithRootValues(values: Record<string, unknown>): CopilotSessionLauncher {
+	const configurationService = {
+		getRootValue: (_schema: unknown, key: string) => values[key],
+	} as Partial<IAgentConfigurationService> as IAgentConfigurationService;
+	return new CopilotSessionLauncher(
+		configurationService,
+		{} as IAgentHostTerminalManager,
+		new NullLogService(),
+		{} as IFileService,
+		{ _serviceBrand: undefined, start: async () => { throw new Error('Unexpected proxy start'); }, dispose: () => { } },
+		new ByokLmBridgeRegistry(),
 	);
 }
 
@@ -404,6 +419,59 @@ suite('CopilotSessionLauncher client identity', () => {
 				resumePluginDirectories: [pluginDir.fsPath],
 				resumeSkillDirectories: [],
 				resumeInstructionDirectories: [URI.joinPath(pluginDir, 'rules').fsPath],
+			});
+		} finally {
+			sessions.dispose();
+			await launcher.disposeByokProxyHandle();
+		}
+	});
+
+	test('forwards managed permissions from root config into create and resume configs', async () => {
+		const createConfigs: Parameters<CopilotClient['createSession']>[0][] = [];
+		const resumeConfigs: Parameters<CopilotClient['resumeSession']>[1][] = [];
+		const session = {
+			sessionId: 'session-1',
+			on: () => () => { },
+			disconnect: async () => { },
+		} as unknown as CopilotSession;
+		const client = {
+			createSession: async (config: Parameters<CopilotClient['createSession']>[0]) => {
+				createConfigs.push(config);
+				return session;
+			},
+			resumeSession: async (_sessionId: string, config: Parameters<CopilotClient['resumeSession']>[1]) => {
+				resumeConfigs.push(config);
+				return session;
+			},
+		};
+		const permissions = { disableBypassPermissionsMode: 'disable', ask: ['Shell(*)'] };
+		const launcher = createTestLauncherWithRootValues({ [AgentHostManagedPermissionsConfigKey]: permissions });
+		const basePlan = {
+			client,
+			sessionId: 'session-1',
+			workingDirectory: testWorkingDirectory,
+			resolvedAgentName: undefined,
+			snapshot: { tools: [], plugins: [], mcpServers: {} },
+			activeClientToolSet: new ActiveClientToolSet(),
+			shellManager: undefined,
+			githubToken: undefined,
+		};
+		const createPlan: CopilotSessionLaunchPlan = { ...basePlan, kind: 'create', model: undefined };
+		const resumePlan: CopilotSessionLaunchPlan = { ...basePlan, kind: 'resume', fallback: { model: undefined } };
+
+		const sessions = new DisposableStore();
+		try {
+			sessions.add(await launcher.launch(createPlan, testRuntime));
+			sessions.add(await launcher.launch(resumePlan, testRuntime));
+
+			assert.deepStrictEqual({
+				create: (createConfigs[0] as { managedSettings?: unknown }).managedSettings,
+				createEnable: (createConfigs[0] as { enableManagedSettings?: boolean }).enableManagedSettings,
+				resume: (resumeConfigs[0] as { managedSettings?: unknown }).managedSettings,
+			}, {
+				create: { permissions },
+				createEnable: true,
+				resume: { permissions },
 			});
 		} finally {
 			sessions.dispose();

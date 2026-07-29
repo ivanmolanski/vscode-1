@@ -11,7 +11,7 @@ import { IFileService } from '../../../files/common/files.js';
 import { ILogService, LogLevel } from '../../../log/common/log.js';
 import { CopilotCliConfigKey, applyModelFamilyAlias, copilotCliConfigSchema, normalizeToolSearchDeferThreshold } from '../../common/copilotCliConfig.js';
 import { agentHostModelSupportsToolSearch, CLIENT_TOOL_SEARCH_REFERENCE_NAME } from './toolSearchDeferral.js';
-import { AgentHostSessionSyncEnabledConfigKey, platformRootSchema, type AgentHostMcpServers } from '../../common/agentHostSchema.js';
+import { AgentHostManagedPermissionsConfigKey, AgentHostSessionSyncEnabledConfigKey, platformRootSchema, type AgentHostMcpServers, type IManagedPermissions } from '../../common/agentHostSchema.js';
 import { AgentSession } from '../../common/agentService.js';
 import { IAgentHostOTelService } from '../../common/otel/agentHostOTelService.js';
 import { AgentHostSandboxConfigKey, sandboxConfigSchema } from '../../common/sandboxConfigSchema.js';
@@ -67,9 +67,23 @@ type McpAuthResponse = Awaited<ReturnType<McpAuthHandler>>;
 type SessionHooks = NonNullable<SessionConfig['hooks']>;
 type PreToolUseHookInput = Parameters<NonNullable<SessionHooks['onPreToolUse']>>[0];
 type PostToolUseHookInput = Parameters<NonNullable<SessionHooks['onPostToolUse']>>[0];
+/**
+ * Local mirror of the SDK's `managedSettings` session-config field, scoped to
+ * the `permissions` object VS Code populates. The published
+ * `@github/copilot-sdk` types (1.0.8) expose `enableManagedSettings` but not
+ * `managedSettings`; this precise additive type lets VS Code forward
+ * enterprise-policy-derived permissions until the SDK publishes the field.
+ * Mirrors the local-type precedent used for `ICopilotRuntimeManagedSettingsSdk`
+ * in copilotAgent.ts.
+ */
+interface ICopilotManagedSettingsSdk {
+	readonly permissions?: IManagedPermissions;
+}
+
 type CopilotSessionLaunchConfig = ResumeSessionConfig & {
 	readonly pluginDirectories?: string[];
 	readonly remoteSession?: 'export';
+	readonly managedSettings?: ICopilotManagedSettingsSdk;
 };
 
 /**
@@ -85,6 +99,14 @@ export interface IActiveClientSnapshot {
 	readonly tools: readonly ToolDefinition[];
 	readonly plugins: readonly ICopilotPluginInfo[];
 	readonly mcpServers: AgentHostMcpServers;
+	/**
+	 * Enterprise-policy-derived managed permissions in effect at snapshot time.
+	 * Participates in restart detection because it is forwarded into the SDK
+	 * session config as `managedSettings.permissions`; a policy change must
+	 * refresh the session so the new permissions apply before the next turn.
+	 * Optional: `undefined` (or absent) means no managed policy applied.
+	 */
+	readonly managedPermissions?: IManagedPermissions | undefined;
 }
 
 /**
@@ -555,6 +577,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// renderer reports no BYOK models), merged into the returned config so both
 		// createSession and resumeSession advertise the models to the runtime.
 		const byok = await this._resolveByokSessionConfig(plan.sessionId);
+		const managedPermissions = this._configurationService.getRootValue(platformRootSchema, AgentHostManagedPermissionsConfigKey);
 		const enableCustomTerminalTool = this._configurationService.getRootValue(copilotCliConfigSchema, CopilotCliConfigKey.EnableCustomTerminalTool) === true;
 		let shellTools: Awaited<ReturnType<typeof createShellTools>> = [];
 		if (enableCustomTerminalTool) {
@@ -647,6 +670,10 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			// events. Without this, sessions default to "off".
 			remoteSession: this._configurationService.getRootValue(platformRootSchema, AgentHostSessionSyncEnabledConfigKey) === true ? 'export' : undefined,
 			enableManagedSettings: true,
+			// Forward enterprise-policy-derived managed permissions (synthesized
+			// by VS Code from managed policy values) as the runtime's
+			// `managedSettings.permissions`. Omitted when no policy applies.
+			...(managedPermissions ? { managedSettings: { permissions: managedPermissions } } : {}),
 		};
 	}
 }
