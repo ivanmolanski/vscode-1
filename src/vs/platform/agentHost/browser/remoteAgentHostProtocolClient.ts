@@ -1574,7 +1574,9 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 		});
 		this.dispatchAction(ROOT_STATE_URI, {
 			type: ActionType.RootConfigChanged,
-			config: { [AgentHostManagedPermissionsConfigKey]: permissions },
+			// Root config patches merge over existing values. An empty object is
+			// the wire-safe clear sentinel because JSON drops `undefined`.
+			config: { [AgentHostManagedPermissionsConfigKey]: permissions ?? {} },
 		}, this._clientId, 0);
 	}
 

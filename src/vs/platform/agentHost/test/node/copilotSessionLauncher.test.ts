@@ -72,6 +72,12 @@ function createTestLauncherWithRootValues(values: Record<string, unknown>): Copi
 		{} as IFileService,
 		{ _serviceBrand: undefined, start: async () => { throw new Error('Unexpected proxy start'); }, dispose: () => { } },
 		new ByokLmBridgeRegistry(),
+		{
+			_serviceBrand: undefined,
+			getSessionTraceContext: () => undefined,
+			releaseSessionTraceContext: () => { },
+			withTraceContext: <T>(_context: undefined, fn: () => T): T => fn(),
+		} as unknown as IAgentHostOTelService,
 	);
 }
 
@@ -497,8 +503,11 @@ suite('CopilotSessionLauncher client identity', () => {
 				return session;
 			},
 		};
-		// Root value unset (default launcher's getRootValue returns undefined).
-		const launcher = createTestLauncher();
+		// The renderer uses an empty object as the merge-safe wire sentinel when
+		// policy is cleared; the launcher must still omit managedSettings.
+		const launcher = createTestLauncherWithRootValues({
+			[AgentHostManagedPermissionsConfigKey]: {},
+		});
 		const basePlan = {
 			client,
 			sessionId: 'session-1',

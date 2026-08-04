@@ -157,6 +157,14 @@ class ManagedPermissionPolicyConfigurationService extends TestConfigurationServi
 		}
 		return base;
 	}
+
+	setPolicyValue(key: string, value: unknown): void {
+		if (value === undefined) {
+			delete this._policyValues[key];
+		} else {
+			this._policyValues[key] = value;
+		}
+	}
 }
 
 suite('RemoteAgentHostProtocolClient', () => {
@@ -931,7 +939,7 @@ suite('RemoteAgentHostProtocolClient', () => {
 		});
 	});
 
-	test('forwards undefined managed permissions when only non-policy values are set', async () => {
+	test('forwards the empty clear sentinel when only non-policy values are set', async () => {
 		const transport = disposables.add(new TestProtocolTransport());
 		// User/workspace values are restrictive, but no enterprise policy is set —
 		// only `policyValue` maps, so nothing must be forwarded.
@@ -943,7 +951,23 @@ suite('RemoteAgentHostProtocolClient', () => {
 		await connectClient(client, transport);
 
 		const managed = findRootConfigNotification(transport.sentMessages, AgentHostManagedPermissionsConfigKey);
-		assert.strictEqual(getRootConfig(managed)[AgentHostManagedPermissionsConfigKey], undefined);
+		assert.deepStrictEqual(getRootConfig(managed)[AgentHostManagedPermissionsConfigKey], {});
+	});
+
+	test('forwards the empty clear sentinel when restrictive policy is removed', async () => {
+		const transport = disposables.add(new TestProtocolTransport());
+		const configurationService = new ManagedPermissionPolicyConfigurationService({
+			[GLOBAL_AUTO_APPROVE_SETTING_ID]: false,
+		});
+		const { client } = createClient(transport, undefined, undefined, undefined, configurationService);
+		await connectClient(client, transport);
+		transport.sentMessages.length = 0;
+
+		configurationService.setPolicyValue(GLOBAL_AUTO_APPROVE_SETTING_ID, undefined);
+		fireConfigurationChange(configurationService, GLOBAL_AUTO_APPROVE_SETTING_ID);
+
+		const managed = findRootConfigNotification(transport.sentMessages, AgentHostManagedPermissionsConfigKey);
+		assert.deepStrictEqual(getRootConfig(managed)[AgentHostManagedPermissionsConfigKey], {});
 	});
 
 	test('forwards codex enablement on connect when the experiment-aware setting is on', async () => {
