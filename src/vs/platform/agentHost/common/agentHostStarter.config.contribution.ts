@@ -16,6 +16,7 @@ import {
 	AgentHostClaudeMultiRootEnabledSettingId,
 	AgentHostCodexAgentBinaryArgsSettingId,
 	AgentHostCodexAgentEnabledSettingId,
+	AgentHostCodexMultiRootEnabledSettingId,
 	AgentHostCodexAgentSdkRootSettingId,
 	AgentHostCodexAgentCodexHomeSettingId,
 	AgentHostCopilotMultiRootEnabledSettingId,
@@ -112,6 +113,12 @@ configurationRegistry.registerConfiguration({
 			// `product.quality !== 'stable'`) to enable it for a build channel.
 			included: false,
 		},
+		[AgentHostCodexMultiRootEnabledSettingId]: {
+			type: 'boolean',
+			description: nls.localize('chat.agentHost.codexAgent.multiRootEnabled', "When enabled, Codex agent-host sessions advertise support for multiple working directories, so a session created in a multi-root workspace can span every workspace folder. Experimental; newly created sessions pick up a change without restarting the agent host."),
+			default: false,
+			included: false,
+		},
 		[AgentHostClaudeAgentEnabledSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agentHost.claudeAgent.enabled', "When enabled, the agent host registers the Claude provider (subject to the Claude SDK being reachable). Independent of `#chat.agents.claude.preferAgentHost#` and `#chat.editor.claude.preferAgentHost#`, which choose which integration surfaces Claude. Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
@@ -144,12 +151,11 @@ configurationRegistry.registerConfiguration({
 		},
 		[AgentHostCodexAgentEnabledSettingId]: {
 			type: 'boolean',
-			description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to the Codex SDK being reachable). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
+			description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to the Codex SDK being reachable). Requires `#chat.agentHost.enabled#`. Enabling takes effect without restarting the agent host."),
 			default: false,
 			tags: ['experimental', 'advanced'],
 			// Allow the default to be overridden by an experiment. Uses `startup`
-			// (matching the sibling agent-host settings) since the agent host
-			// process must be restarted for a change to take effect anyway.
+			// to match the sibling agent-host provider settings.
 			experiment: { mode: 'startup' },
 			// Owns the `Codex3PIntegration` policy; gating here disables Codex across all agent-host surfaces.
 			policy: {
