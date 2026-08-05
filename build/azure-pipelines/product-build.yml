@@ -803,6 +803,76 @@ extends:
                   container: ubuntu-24
                   arch: arm64
 
+      # SDK canary builds deliberately never publish, so the SanityTests stage above cannot reach
+      # them through the update service. Run the same suite against this build's own artifacts
+      # instead, scoped to the architectures the downloaded artifacts cover.
+      - ${{ if ne(variables['VSCODE_SDK_CANARY_VERSION'], '') }}:
+        - stage: CanarySanityTests
+          displayName: Sanity Tests (SDK Canary)
+          dependsOn:
+            - ${{ if eq(variables['VSCODE_BUILD_STAGE_WINDOWS'], true) }}:
+              - Windows
+            - ${{ if eq(variables['VSCODE_BUILD_STAGE_LINUX'], true) }}:
+              - Linux
+            - ${{ if eq(variables['VSCODE_BUILD_STAGE_MACOS'], true) }}:
+              - macOS
+          variables:
+            - name: BUILD_COMMIT
+              value: $(Build.SourceVersion)
+            - name: BUILD_QUALITY
+              value: ${{ variables.VSCODE_QUALITY }}
+          jobs:
+            - ${{ if eq(parameters.VSCODE_BUILD_LINUX, true) }}:
+              - template: build/azure-pipelines/common/sanity-tests.yml@self
+                parameters:
+                  name: canary_ubuntu_x64
+                  displayName: Ubuntu 22.04 x64 (canary artifacts)
+                  poolName: 1es-ubuntu-22.04-x64
+                  os: linux
+                  continueOnError: false
+                  # No dnf/yum on the Ubuntu host, so the rpm test would always skip.
+                  args: --artifacts-dir $(ARTIFACTS_DIR) --grep "linux(-deb|-snap)?-x64$"
+                  artifacts:
+                    - vscode_cli_linux_x64_cli
+                    - vscode_client_linux_x64_archive-unsigned
+                    - vscode_client_linux_x64_deb-package
+                    - vscode_client_linux_x64_snap
+                    - vscode_server_linux_x64_archive-unsigned
+                    - vscode_web_linux_x64_archive-unsigned
+
+            - ${{ if eq(parameters.VSCODE_BUILD_WIN32, true) }}:
+              - template: build/azure-pipelines/common/sanity-tests.yml@self
+                parameters:
+                  name: canary_windows_x64
+                  displayName: Windows x64 (canary artifacts)
+                  poolName: 1es-windows-2022-x64
+                  os: windows
+                  continueOnError: false
+                  args: --artifacts-dir $(ARTIFACTS_DIR) --grep "win32-x64"
+                  artifacts:
+                    - vscode_cli_win32_x64_cli
+                    - vscode_client_win32_x64_archive
+                    - vscode_client_win32_x64_setup
+                    - vscode_client_win32_x64_user-setup
+                    - vscode_server_win32_x64_archive
+                    - vscode_web_win32_x64_archive
+
+            - ${{ if eq(parameters.VSCODE_BUILD_MACOS_ARM64, true) }}:
+              - template: build/azure-pipelines/common/sanity-tests.yml@self
+                parameters:
+                  name: canary_macos_arm64
+                  displayName: macOS arm64 (canary artifacts)
+                  poolName: AcesShared
+                  os: macOS
+                  continueOnError: false
+                  args: --artifacts-dir $(ARTIFACTS_DIR) --grep "darwin-arm64"
+                  artifacts:
+                    - vscode_cli_darwin_arm64_cli
+                    - vscode_client_darwin_arm64_archive
+                    - vscode_client_darwin_arm64_dmg
+                    - vscode_server_darwin_arm64_archive
+                    - vscode_web_darwin_arm64_archive
+
         - ${{ if and(parameters.VSCODE_RELEASE, eq(variables['VSCODE_QUALITY'], 'insider'), eq(variables['VSCODE_PRIVATE_BUILD'], false), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))) }}:
           - stage: ApproveRelease
             dependsOn: [] # run in parallel to compile stage

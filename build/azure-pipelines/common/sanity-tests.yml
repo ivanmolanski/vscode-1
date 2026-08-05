@@ -17,11 +17,20 @@ parameters:
   - name: args
     type: string
     default: ""
+  # Build pipeline artifacts to download before running. Callers that set this must also pass
+  # --artifacts-dir $(ARTIFACTS_DIR) in `args` so targets resolve from them instead of the
+  # update service, which only serves published builds.
+  - name: artifacts
+    type: object
+    default: []
+  - name: continueOnError
+    type: boolean
+    default: true
 
 jobs:
   - job: ${{ parameters.name }}
     displayName: ${{ parameters.displayName }}
-    continueOnError: true
+    continueOnError: ${{ parameters.continueOnError }}
     pool:
       name: ${{ parameters.poolName }}
       os: ${{ parameters.os }}
@@ -47,6 +56,7 @@ jobs:
       LOG_FILE: $(TEST_DIR)/results.xml
       SCREENSHOTS_DIR: $(TEST_DIR)/screenshots
       CRASH_DUMPS_DIR: $(TEST_DIR)/crash-dumps
+      ARTIFACTS_DIR: $(Agent.TempDirectory)/sanity-artifacts
     steps:
       - checkout: self
         fetchDepth: 1
@@ -54,6 +64,14 @@ jobs:
         sparseCheckoutDirectories: build/azure-pipelines/config test/sanity .nvmrc
         retryCountOnTaskFailure: 3
         displayName: Checkout test/sanity
+
+      - ${{ each artifact in parameters.artifacts }}:
+        - task: DownloadPipelineArtifact@2
+          inputs:
+            artifact: ${{ artifact }}
+            path: $(ARTIFACTS_DIR)/${{ artifact }}
+          retryCountOnTaskFailure: 3
+          displayName: Download ${{ artifact }}
 
       - ${{ if eq(parameters.os, 'windows') }}:
         - script: mkdir "$(SCREENSHOTS_DIR)"
