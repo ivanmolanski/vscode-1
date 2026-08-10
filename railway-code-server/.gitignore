@@ -1,0 +1,10 @@
+# Never commit credentials to the repo
+.railway-password.txt
+.railway-sudo-password.txt
+
+# Local Railway CLI state
+.railway/
+
+# OS noise
+Thumbs.db
+.DS_Store

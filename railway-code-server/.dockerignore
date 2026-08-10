@@ -1,0 +1,13 @@
+# Railway code-server deployment — local deploy context
+# Deploy with:  railway link -s code-server && railway up
+src/
+*.log
+node_modules/
+.git/
+dist/
+out/
+**/.vscode-oss-dev/
+# never bake credentials into the image
+.railway-password.txt
+.railway-sudo-password.txt
+.railway/
