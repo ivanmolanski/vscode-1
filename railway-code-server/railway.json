@@ -5,10 +5,29 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "/usr/local/bin/docker-entrypoint.sh",
     "healthcheckPath": "/",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
+  },
+  "services": {
+    "code-server": {
+      "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile" },
+      "deploy": { "startCommand": "/usr/local/bin/docker-entrypoint.sh" },
+      "variables": {
+        "DOCKER_HOST": "tcp://docker-daemon:2375",
+        "DEFAULT_WORKSPACE": "/config/workspace"
+      }
+    },
+    "docker-daemon": {
+      "image": "docker:27-dind",
+      "variables": {
+        "DOCKER_TLS_CERTDIR": ""
+      },
+      "deploy": {
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10
+      }
+    }
   }
 }
