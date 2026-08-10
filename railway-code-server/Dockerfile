@@ -93,15 +93,14 @@ RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-amd64.tar.gz | tar -xz -C /usr/l
 	ln -sf /usr/local/go/bin/go /usr/local/bin/go && \
 	ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
-# Rust (minimal profile). Pin RUSTUP_HOME/CARGO_HOME to /tmp-free shared paths
-# and HOME=/root so the install location is deterministic (the base image may
-# otherwise leave $HOME pointing somewhere unexpected). The toolchain lives
-# under /root, which the runtime user 'abc' cannot traverse, so chmod the
-# homes world-executable and symlink the binaries into /usr/local/bin.
+# Rust (minimal profile). Pin RUSTUP_HOME/CARGO_HOME and HOME only for this
+# RUN (NOT globally — a global HOME=/root would leak to the runtime user
+# 'abc', making code-server write config to /root instead of /home/abc). The
+# toolchain lives under /root, which 'abc' cannot traverse, so chmod the homes
+# world-executable and symlink the binaries into /usr/local/bin.
 ENV RUSTUP_HOME=/root/.rustup \
-	CARGO_HOME=/root/.cargo \
-	HOME=/root
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal && \
+	CARGO_HOME=/root/.cargo
+RUN HOME=/root curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal && \
 	chmod -R a+rX /root/.cargo /root/.rustup && \
 	ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc && \
 	ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && \
