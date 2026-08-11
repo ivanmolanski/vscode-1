@@ -93,14 +93,14 @@ RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-amd64.tar.gz | tar -xz -C /usr/l
 	ln -sf /usr/local/go/bin/go /usr/local/bin/go && \
 	ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
-# Rust (minimal profile). Pin RUSTUP_HOME/CARGO_HOME and HOME only for this
-# RUN (NOT globally — a global HOME=/root would leak to the runtime user
-# 'abc', making code-server write config to /root instead of /home/abc). The
-# toolchain lives under /root, which 'abc' cannot traverse, so chmod the homes
-# world-executable and symlink the binaries into /usr/local/bin.
+# Rust (minimal profile). Install with --no-modify-path so rustup does NOT
+# inject a `source $CARGO_HOME/env` line into the shell profile — that line
+# errors on every terminal open ("bash: /config/.cargo/env: No such file or
+# directory") when the env file is missing or lives on the mounted volume.
+# The binaries are symlinked into /usr/local/bin, so no env sourcing is needed.
 ENV RUSTUP_HOME=/root/.rustup \
 	CARGO_HOME=/root/.cargo
-RUN HOME=/root curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal && \
+RUN HOME=/root curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal --no-modify-path && \
 	chmod -R a+rX /root/.cargo /root/.rustup && \
 	ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc && \
 	ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && \

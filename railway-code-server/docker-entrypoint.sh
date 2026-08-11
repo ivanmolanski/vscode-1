@@ -12,6 +12,17 @@
 
 set -e
 
+# Strip any stale `source .../.cargo/env` (or `. "$CARGO_HOME/env"`) lines that
+# rustup may have injected into shell profiles. These lines error on every
+# terminal open ("bash: /config/.cargo/env: No such file or directory") when the
+# env file is missing or lives on the mounted volume. cargo/rustc are on PATH
+# via /usr/local/bin symlinks, so the sourcing is never needed.
+for f in /home/abc/.bashrc /home/abc/.profile /home/abc/.bash_profile /root/.bashrc /root/.profile; do
+	if [ -f "$f" ]; then
+		sed -i '/\.cargo\/env/d; /cargo\/env"/d' "$f" 2>/dev/null || true
+	fi
+done
+
 if [ -e /init ]; then
 	exec /init
 fi
