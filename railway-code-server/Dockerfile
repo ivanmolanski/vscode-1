@@ -98,14 +98,17 @@ RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-amd64.tar.gz | tar -xz -C /usr/l
 # errors on every terminal open ("bash: /config/.cargo/env: No such file or
 # directory") when the env file is missing or lives on the mounted volume.
 # The binaries are symlinked into /usr/local/bin, so no env sourcing is needed.
-ENV RUSTUP_HOME=/root/.rustup \
-	CARGO_HOME=/root/.cargo
-RUN HOME=/root curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal --no-modify-path && \
-	chmod -R a+rX /root/.cargo /root/.rustup && \
-	ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc && \
-	ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && \
-	ln -sf /root/.cargo/bin/rustfmt /usr/local/bin/rustfmt && \
-	ln -sf /root/.cargo/bin/clippy-driver /usr/local/bin/clippy-driver
+# RUSTUP_HOME/CARGO_HOME live under /opt/rust (world-readable, shared) so the
+# runtime user 'abc' can traverse and write them; /root is not traversable by
+# abc.
+ENV RUSTUP_HOME=/opt/rust/.rustup \
+	CARGO_HOME=/opt/rust/.cargo
+RUN HOME=/opt/rust curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal --no-modify-path && \
+	chmod -R a+rX /opt/rust/.cargo /opt/rust/.rustup && \
+	ln -sf /opt/rust/.cargo/bin/rustc /usr/local/bin/rustc && \
+	ln -sf /opt/rust/.cargo/bin/cargo /usr/local/bin/cargo && \
+	ln -sf /opt/rust/.cargo/bin/rustfmt /usr/local/bin/rustfmt && \
+	ln -sf /opt/rust/.cargo/bin/clippy-driver /usr/local/bin/clippy-driver
 
 # ---------------------------------------------------------------------------
 # Git defaults + SSH dirs for github integration
@@ -127,12 +130,14 @@ COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 
 # Fail-fast: verify every toolchain from the image is runnable. This catches a
-# broken install at build time instead of when a user tries to run it.
+# broken install at build time instead of when a user tries to run it. The Rust
+# checks run as 'abc' (the runtime user) to prove the toolchain is usable by
+# the user who will actually run it, not just by root.
 RUN set -eux; \
 	node --version; npm --version; yarn --version; pnpm --version; bun --version; \
 	python3 --version; pip3 --version; uv --version; poetry --version; \
-	go version; rustc --version; cargo --version; \
-	git --version; git-lfs --version; jq --version; \
+	go version; git --version; git-lfs --version; jq --version; \
+	su abc -s /bin/bash -c 'rustc --version && cargo --version'; \
 	echo "All toolchains OK"
 
 EXPOSE 8443

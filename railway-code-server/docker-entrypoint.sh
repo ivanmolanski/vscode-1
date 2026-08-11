@@ -19,7 +19,7 @@ set -e
 # via /usr/local/bin symlinks, so the sourcing is never needed.
 for f in /home/abc/.bashrc /home/abc/.profile /home/abc/.bash_profile /root/.bashrc /root/.profile; do
 	if [ -f "$f" ]; then
-		sed -i '/\.cargo\/env/d; /cargo\/env"/d' "$f" 2>/dev/null || true
+		sed -i '/\.cargo\/env/d; /cargo\/env"/d; /CARGO_HOME\/env/d' "$f" 2>/dev/null || true
 	fi
 done
 
