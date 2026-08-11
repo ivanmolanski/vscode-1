@@ -1,14 +1,12 @@
 #!/bin/bash
 # code-server (linuxserver) entrypoint for Railway
 #
-# The linuxserver image manages the app via s6-overlay (/init): it starts
-# code-server on [::]:8443 as user abc with PUID/PGID, PASSWORD/SUDO_PASSWORD,
-# DEFAULT_WORKSPACE, etc. (see root/etc/s6-overlay/s6-rc.d/svc-code-server/run).
-# Railway conventions are honored here:
-#   - RAILWAY_RUN_UID / RAILWAY_RUN_GID are set by Railway only when a
-#     non-root image is detected, to align with volume ownership. The image
-#     runs as 'abc' (default 1000:1000) via PUID/PGID, which matches Railway's
-#     default mount ownership — so in practice no action is needed.
+# Runs code-server DIRECTLY (bypassing the linuxserver s6 overlay) so we can
+# control auth and telemetry completely:
+#   - --auth none        : no passwords, behaves like local VS Code
+#   - --disable-telemetry: no data leaves the box
+# The linuxserver /init always forces password auth and its own env handling,
+# so we don't exec it — we own the process.
 
 set -e
 
@@ -24,19 +22,24 @@ for f in /config/.bashrc /config/.profile /config/.bash_profile /home/abc/.bashr
 	fi
 done
 
-if [ -e /init ]; then
-	exec /init
-fi
+# Force the config to auth:none even if a stale config.yaml exists.
+# Update checks stay ENABLED (no disable-update-check) so you're always
+# prompted when a newer code-server version is available.
+mkdir -p /config/.config/code-server
+cat > /config/.config/code-server/config.yaml <<'EOF'
+bind-addr: 0.0.0.0:8443
+auth: none
+password: ''
+disable-telemetry: true
+EOF
 
-# Fallback (should not normally happen): launch code-server directly.
-PASSWORD_ARGS=()
-if [ -n "${PASSWORD:-}" ]; then
-	PASSWORD_ARGS=(--auth password)
-fi
+chown -R abc:abc /config 2>/dev/null || true
+
+# No proxy domain, direct bind
 exec /app/code-server/bin/code-server \
 	--bind-addr "[::]:8443" \
 	--user-data-dir /config/data \
 	--extensions-dir /config/extensions \
+	--auth none \
 	--disable-telemetry \
-	"${PASSWORD_ARGS[@]}" \
 	"${DEFAULT_WORKSPACE:-/config/workspace}"

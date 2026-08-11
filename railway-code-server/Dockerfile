@@ -48,11 +48,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/*
 
-# npm global installs must not touch the mounted volume (/config is a Railway
-# volume at runtime; npm resolves the prefix from CWD, so pin cache+prefix to
-# /usr/local).
-ENV NPM_CONFIG_PREFIX=/usr/local \
-	NPM_CONFIG_CACHE=/usr/local/.npm-cache
+# npm global installs — use a user-writable prefix so the 'abc' runtime user
+# can install global packages without EACCES. /config is the Railway volume,
+# so it persists across restarts.
+ENV NPM_CONFIG_PREFIX=/config/.npm-global \
+	NPM_CONFIG_CACHE=/config/.npm-cache
+
+# Ensure the prefix directory exists and is writable by abc
+RUN mkdir -p /config/.npm-global /config/.npm-cache && \
+	chown -R abc:abc /config/.npm-global /config/.npm-cache
 
 # Corepack, yarn, pnpm — npm 11+ blocks install scripts by default, so opt
 # corepack in via `--allow-scripts=corepack` (equals syntax! a bare
@@ -112,14 +116,72 @@ RUN HOME=/opt/rust curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | s
 	ln -sf /opt/rust/.cargo/bin/clippy-driver /usr/local/bin/clippy-driver
 
 # ---------------------------------------------------------------------------
+# NO TELEMETRY — every toolchain opt-out. "No big brother anywhere."
+# ---------------------------------------------------------------------------
+ENV DO_NOT_TRACK=1 \
+	CHECKPOINT_DISABLE=1 \
+	TELEMETRY_DISABLED=1 \
+	VSCODE_TELEMETRY=off \
+	CODESIGNING_HELPER_DISABLE=1 \
+	NPM_CONFIG_UPDATE_NOTIFIER=false \
+	NPM_CONFIG_FUND=false \
+	NPM_CONFIG_AUDIT=false \
+	PIP_DISABLE_PIP_VERSION_CHECK=1 \
+	PIP_NO_INDEX=0 \
+	UV_NO_PROGRESS=1 \
+	UV_DISABLE_TELEMETRY=1 \
+	GOFLAGS=-buildvcs=false \
+	GO111MODULE=on \
+	GOTOOLCHAIN=local \
+	RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup \
+	CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+	PYTHONDONTWRITEBYTECODE=1 \
+	PYTHONUNBUFFERED=1 \
+	BUN_INSTALL=/opt/bun
+
+# ---------------------------------------------------------------------------
 # Git defaults + SSH dirs for github integration
 # ---------------------------------------------------------------------------
 RUN git config --global init.defaultBranch main && \
 	git config --global pull.rebase false && \
+	git config --global core.autocrlf false && \
+	git config --global core.filemode false && \
+	git config --global advice.statusHints false && \
 	git lfs install --system && \
 	mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
 	mkdir -p /home/abc/.ssh && chmod 700 /home/abc/.ssh && \
 	chown -R abc:abc /home/abc/.ssh
+
+# ---------------------------------------------------------------------------
+# Telemetry opt-outs written to each tool's own config (persistent form)
+# ---------------------------------------------------------------------------
+RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config /root/.cargo /home/abc/.cargo && \
+	printf '%s\n' \
+		'[http]' \
+		'	proxy = ""' \
+		'[credential]' \
+		'	helper = ""' \
+		> /root/.gitconfig.telemetry 2>/dev/null; \
+	printf '%s\n' \
+		'export PATH="/config/.npm-global/bin:$PATH"' \
+		'export DO_NOT_TRACK=1' \
+		'export CHECKPOINT_DISABLE=1' \
+		'export TELEMETRY_DISABLED=1' \
+		'export VSCODE_TELEMETRY=off' \
+		'export PIP_DISABLE_PIP_VERSION_CHECK=1' \
+		'export UV_DISABLE_TELEMETRY=1' \
+		'export UV_NO_PROGRESS=1' \
+		'export CARGO_HTTP_MULTIPLEXING=false' \
+		'export RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup' \
+		'export GOFLAGS=-buildvcs=false' \
+		'export PYTHONDONTWRITEBYTECODE=1' \
+		'export NPM_CONFIG_UPDATE_NOTIFIER=false' \
+		'export NPM_CONFIG_FUND=false' \
+		'export NPM_CONFIG_AUDIT=false' \
+		> /etc/profile.d/99-telemetry-off.sh && \
+	chmod 644 /etc/profile.d/99-telemetry-off.sh && \
+	chown -R abc:abc /home/abc/.config /home/abc/.cargo && \
+	chmod -R a+rX /etc/profile.d
 
 # ---------------------------------------------------------------------------
 # Entrypoint + helper. The image has NO original docker-entrypoint.sh (its
