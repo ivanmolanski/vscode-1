@@ -38,6 +38,7 @@ RUN apt-get update && \
 	libssl-dev \
 	libffi-dev \
 	python3-dev \
+	docker.io \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
