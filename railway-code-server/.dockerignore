@@ -8,8 +8,6 @@ dist/
 out/
 **/.vscode-oss-dev/
 # local eslint scaffolding (never bake into the build)
-package.json
-package-lock.json
 eslint.config.js
 .eslintrc*
 # never bake credentials into the image

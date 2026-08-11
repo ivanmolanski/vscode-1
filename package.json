@@ -197,7 +197,7 @@
     "@types/yauzl": "*",
     "@types/yazl": "*",
     "@typescript-eslint/utils": "*",
-    "@typescript/native": "*",
+    "@typescript/native": "npm:typescript@*",
     "@vscode/component-explorer": "*",
     "@vscode/component-explorer-cli": "*",
     "@vscode/gulp-electron": "*",
@@ -267,7 +267,7 @@
     "source-map-support": "*",
     "tsec": "*",
     "tslib": "*",
-    "typescript": "*",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "*",
     "util": "*",
     "xml2js": "*",
@@ -279,6 +279,7 @@
       "node-addon-api": "*"
     },
     "serialize-javascript": "*",
+    "typescript": "npm:@typescript/typescript6@*",
     "yauzl": "*"
   },
   "repository": {

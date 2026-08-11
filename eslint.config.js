@@ -15,7 +15,10 @@ import * as pluginCopilotLocal from './extensions/copilot/.eslintplugin/index.ts
 import pluginImport from 'eslint-plugin-import';
 import pluginJsdoc from 'eslint-plugin-jsdoc';
 
-import pluginHeader from 'eslint-plugin-header';
+// Vendored fork of eslint-plugin-header (MIT) patched for ESLint 10 (upstream
+// 3.1.1 is unmaintained and uses the removed context.getSourceCode()).
+import * as headerModule from './build/lib/eslint-plugin-header/header.cjs';
+const pluginHeader = headerModule.default;
 pluginHeader.rules.header.meta.schema = false;
 
 const ignores = fs.readFileSync(path.join(import.meta.dirname, '.eslint-ignore'), 'utf8')

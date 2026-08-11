@@ -6,7 +6,7 @@
 import * as eslint from 'eslint';
 import { TSESTree } from '@typescript-eslint/utils';
 import * as path from 'path';
-import minimatch from 'minimatch';
+import { minimatch } from 'minimatch';
 import { createImportRuleListener } from './utils.ts';
 
 const REPO_ROOT = path.normalize(path.join(import.meta.dirname, '../'));
@@ -282,6 +282,6 @@ export default new class implements eslint.Rule.RuleModule {
  * Returns the filename relative to the project root and using `/` as separators
  */
 function getRelativeFilename(context: eslint.Rule.RuleContext): string {
-	const filename = path.normalize(context.getFilename());
+	const filename = path.normalize(context.filename);
 	return filename.substring(REPO_ROOT.length).replace(/\\/g, '/');
 }
