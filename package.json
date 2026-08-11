@@ -98,8 +98,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "*",
-    "@GitHub/copilot": "*",
-    "@GitHub/copilot-sdk": "*",
+    "@github/copilot": "*",
+    "@github/copilot-sdk": "*",
     "@microsoft/1ds-core-js": "*",
     "@microsoft/1ds-post-js": "*",
     "@microsoft/dev-tunnels-connections": "*",

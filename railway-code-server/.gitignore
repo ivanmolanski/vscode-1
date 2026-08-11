@@ -8,3 +8,8 @@
 # OS noise
 Thumbs.db
 .DS_Store
+
+node_modules/
+package.json
+package-lock.json
+eslint.config.js
