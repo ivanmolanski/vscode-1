@@ -93,7 +93,7 @@ function hasSupportedVisualStudioVersion(): boolean {
 	// https://source.chromium.org/chromium/chromium/src/+/master:build/vs_toolchain.py;l=140-175
 	const supportedVersions = ['2022', '2019'];
 
-	const vsTypes = [
+	const vsTypes: string[] = [
 		'Enterprise',
 		'Professional',
 		'Community',
@@ -108,7 +108,10 @@ function hasSupportedVisualStudioVersion(): boolean {
 	// Honor every explicit vs<year>_install override, not just the two known
 	// years. Custom install paths may point at any VS release line.
 	for (const [environmentVariable, vsPath] of Object.entries(process.env)) {
-		if (environmentVariable.startsWith('vs') && environmentVariable.endsWith('_install')) {
+		// Only match the complete vs<year>_install naming pattern (year is
+		// a 4-digit number) to avoid picking up unrelated variables such as
+		// "vsomething_install" or "system_install".
+		if (/^vs\d{4}_install$/.test(environmentVariable)) {
 			if (vsPath && fs.existsSync(vsPath)) {
 				return true;
 			}
