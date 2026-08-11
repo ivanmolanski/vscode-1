@@ -17,7 +17,8 @@ set -e
 # terminal open ("bash: /config/.cargo/env: No such file or directory") when the
 # env file is missing or lives on the mounted volume. cargo/rustc are on PATH
 # via /usr/local/bin symlinks, so the sourcing is never needed.
-for f in /home/abc/.bashrc /home/abc/.profile /home/abc/.bash_profile /root/.bashrc /root/.profile; do
+# The user's home is /config (the Railway volume), so clean profiles there too.
+for f in /config/.bashrc /config/.profile /config/.bash_profile /home/abc/.bashrc /home/abc/.profile /home/abc/.bash_profile /root/.bashrc /root/.profile; do
 	if [ -f "$f" ]; then
 		sed -i '/\.cargo\/env/d; /cargo\/env"/d; /CARGO_HOME\/env/d' "$f" 2>/dev/null || true
 	fi
