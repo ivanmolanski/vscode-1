@@ -3,10 +3,10 @@
 #
 # Runs code-server DIRECTLY (bypassing the linuxserver s6 overlay) so we can
 # control auth and telemetry completely:
-#   - --auth none        : no passwords, behaves like local VS Code
+#   - --auth password    : login required before the editor loads
 #   - --disable-telemetry: no data leaves the box
-# The linuxserver /init always forces password auth and its own env handling,
-# so we don't exec it — we own the process.
+# The password is persisted to /config so it survives restarts, and is
+# printed to the log on first boot for easy retrieval.
 
 set -e
 
@@ -22,24 +22,41 @@ for f in /config/.bashrc /config/.profile /config/.bash_profile /home/abc/.bashr
 	fi
 done
 
-# Force the config to auth:none even if a stale config.yaml exists.
-# Update checks stay ENABLED (no disable-update-check) so you're always
-# prompted when a newer code-server version is available.
+# Resolve the login password:
+#   1. $PASSWORD env var if set (recommended: set it on the Railway service)
+#   2. else generate a random one and persist it to /config so it is stable
+CS_PASSWORD="${PASSWORD:-}"
+if [ -z "$CS_PASSWORD" ] && [ -f /config/.code-server-password ]; then
+	CS_PASSWORD="$(cat /config/.code-server-password)"
+fi
+if [ -z "$CS_PASSWORD" ]; then
+	CS_PASSWORD="$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
+	echo "$CS_PASSWORD" > /config/.code-server-password
+	chmod 600 /config/.code-server-password
+	echo "Generated code-server login password: $CS_PASSWORD" >&2
+fi
+
+# Write the config with auth=password. Update checks stay ENABLED (no
+# disable-update-check) so you are always prompted for newer versions.
 mkdir -p /config/.config/code-server
-cat > /config/.config/code-server/config.yaml <<'EOF'
+cat > /config/.config/code-server/config.yaml <<EOF
 bind-addr: 0.0.0.0:8443
-auth: none
-password: ''
+auth: password
+password: ${CS_PASSWORD}
 disable-telemetry: true
 EOF
 
 chown -R abc:abc /config 2>/dev/null || true
 
-# No proxy domain, direct bind
+# Ensure the npm global bin is on PATH for terminal sessions (redundant with
+# /usr/local already on PATH, but explicit never hurts)
+export PATH="/usr/local/bin:$PATH"
+
+# Direct bind, password required
 exec /app/code-server/bin/code-server \
 	--bind-addr "[::]:8443" \
+	--config /config/.config/code-server/config.yaml \
 	--user-data-dir /config/data \
 	--extensions-dir /config/extensions \
-	--auth none \
 	--disable-telemetry \
 	"${DEFAULT_WORKSPACE:-/config/workspace}"

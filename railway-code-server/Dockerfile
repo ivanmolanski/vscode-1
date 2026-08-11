@@ -42,26 +42,26 @@ RUN apt-get update && \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
-# Node.js current (from Nodesource) — installs node + npm
+# Verify Docker CLI installed
+RUN docker --version
+
+# Node.js current (from Nodesource) - installs node + npm
 RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - && \
 	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/*
 
-# npm global installs — use a user-writable prefix so the 'abc' runtime user
-# can install global packages without EACCES. /config is the Railway volume,
-# so it persists across restarts.
-ENV NPM_CONFIG_PREFIX=/config/.npm-global \
-	NPM_CONFIG_CACHE=/config/.npm-cache
+# npm global installs live in /usr/local (already on PATH automatically,
+# just like npm --prefix on a local machine). With PUID=0 at runtime the
+# user is root and can write anywhere, so no permission gymnastics needed.
+# Cache goes to /tmp since it's ephemeral and doesn't need persistence.
+ENV NPM_CONFIG_PREFIX=/usr/local \
+	NPM_CONFIG_CACHE=/tmp/.npm-cache
+# Ensure /usr/local/bin is on PATH for every process (not only login shells)
+ENV PATH="/usr/local/bin:${PATH}"
 
-# Ensure the prefix directory exists and is writable by abc
-RUN mkdir -p /config/.npm-global /config/.npm-cache && \
-	chown -R abc:abc /config/.npm-global /config/.npm-cache
-
-# Corepack, yarn, pnpm — npm 11+ blocks install scripts by default, so opt
-# corepack in via `--allow-scripts=corepack` (equals syntax! a bare
-# `--allow-scripts <pkg>` consumes <pkg> as the flag value, leaving npm with
-# no install target → ENOENT <cwd>/package.json).
+# Corepack, yarn, pnpm - npm 11+ blocks install scripts by default, so opt
+# corepack in via `--allow-scripts=corepack`
 RUN cd /tmp && \
 	npm install -g --allow-scripts=corepack corepack && \
 	corepack enable && \
@@ -99,7 +99,7 @@ RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-amd64.tar.gz | tar -xz -C /usr/l
 	ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
 # Rust (minimal profile). Install with --no-modify-path so rustup does NOT
-# inject a `source $CARGO_HOME/env` line into the shell profile — that line
+# inject a `source $CARGO_HOME/env` line into the shell profile - that line
 # errors on every terminal open ("bash: /config/.cargo/env: No such file or
 # directory") when the env file is missing or lives on the mounted volume.
 # The binaries are symlinked into /usr/local/bin, so no env sourcing is needed.
@@ -109,7 +109,8 @@ RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-amd64.tar.gz | tar -xz -C /usr/l
 ENV RUSTUP_HOME=/opt/rust/.rustup \
 	CARGO_HOME=/opt/rust/.cargo
 RUN HOME=/opt/rust curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-host x86_64-unknown-linux-gnu --profile minimal --no-modify-path && \
-	chmod -R a+rX /opt/rust/.cargo /opt/rust/.rustup && \
+	chown -R abc:abc /opt/rust && \
+	chmod -R a+rX /opt/rust && \
 	ln -sf /opt/rust/.cargo/bin/rustc /usr/local/bin/rustc && \
 	ln -sf /opt/rust/.cargo/bin/cargo /usr/local/bin/cargo && \
 	ln -sf /opt/rust/.cargo/bin/rustfmt /usr/local/bin/rustfmt && \
@@ -140,13 +141,15 @@ ENV DO_NOT_TRACK=1 \
 	BUN_INSTALL=/opt/bun
 
 # ---------------------------------------------------------------------------
-# Git defaults + SSH dirs for github integration
+# Git defaults - use --system so they apply to EVERY user at runtime, not just
+# root. (--global writes /root/.gitconfig, which the runtime user never reads
+# because HOME=/config.)
 # ---------------------------------------------------------------------------
-RUN git config --global init.defaultBranch main && \
-	git config --global pull.rebase false && \
-	git config --global core.autocrlf false && \
-	git config --global core.filemode false && \
-	git config --global advice.statusHints false && \
+RUN git config --system init.defaultBranch main && \
+	git config --system pull.rebase false && \
+	git config --system core.autocrlf false && \
+	git config --system core.filemode false && \
+	git config --system advice.statusHints false && \
 	git lfs install --system && \
 	mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
 	mkdir -p /home/abc/.ssh && chmod 700 /home/abc/.ssh && \
@@ -155,7 +158,7 @@ RUN git config --global init.defaultBranch main && \
 # ---------------------------------------------------------------------------
 # Telemetry opt-outs written to each tool's own config (persistent form)
 # ---------------------------------------------------------------------------
-RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config /root/.cargo /home/abc/.cargo && \
+RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config && \
 	printf '%s\n' \
 		'[http]' \
 		'	proxy = ""' \
@@ -163,7 +166,6 @@ RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config /root/.cargo /home/a
 		'	helper = ""' \
 		> /root/.gitconfig.telemetry 2>/dev/null; \
 	printf '%s\n' \
-		'export PATH="/config/.npm-global/bin:$PATH"' \
 		'export DO_NOT_TRACK=1' \
 		'export CHECKPOINT_DISABLE=1' \
 		'export TELEMETRY_DISABLED=1' \
@@ -180,14 +182,15 @@ RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config /root/.cargo /home/a
 		'export NPM_CONFIG_AUDIT=false' \
 		> /etc/profile.d/99-telemetry-off.sh && \
 	chmod 644 /etc/profile.d/99-telemetry-off.sh && \
-	chown -R abc:abc /home/abc/.config /home/abc/.cargo && \
+	chown -R abc:abc /home/abc/.config && \
 	chmod -R a+rX /etc/profile.d
 
 # ---------------------------------------------------------------------------
 # Entrypoint + helper. The image has NO original docker-entrypoint.sh (its
 # usr/local/bin only ships install-extension), so this COPY is additive.
 # Persistence: the image's own s6 init creates /config/{extensions,data,
-# workspace,.ssh} and chowns them to abc — attach the Railway volume at /config.
+# workspace,.ssh} and chowns them to abc - attach the Railway volume at
+# /config.
 # ---------------------------------------------------------------------------
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
