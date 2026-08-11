@@ -9,8 +9,8 @@ import os
 def _parse_dmg_entities(plist_data):
     """Extract (mount_point, device) from an hdiutil attach plist.
 
-    Returns (None, None) when the device-entry is missing, and
-    (mount_point, None) when only the mount-point is missing, so callers
+    Returns (None, device) when the mount-point is missing, and
+    (mount_point, None) when the device-entry is missing, so callers
     can distinguish the two failure modes.
     """
     mount_point = None
@@ -46,12 +46,15 @@ def patch_dmg_icon(dmg_path, new_icon_path):
         plist = plistlib.loads(result.stdout)
         mount_point, device = _parse_dmg_entities(plist)
 
-        if mount_point is None:
-            raise RuntimeError("Failed to locate mount point for attached DMG")
-        if device is None:
-            raise RuntimeError("Failed to locate device entry for attached DMG")
-
+        # Detach in all paths once the device is known, including when the
+        # mount-point validation below fails: a mounted DMG must always be
+        # detached so it does not remain attached after an error.
         try:
+            if mount_point is None:
+                raise RuntimeError("Failed to locate mount point for attached DMG")
+            if device is None:
+                raise RuntimeError("Failed to locate device entry for attached DMG")
+
             # 3. Copy custom icon
             icon_target = os.path.join(mount_point, ".VolumeIcon.icns")
             shutil.copyfile(new_icon_path, icon_target)
@@ -63,8 +66,9 @@ def patch_dmg_icon(dmg_path, new_icon_path):
             subprocess.run(["sync", "--file-system", mount_point], check=True)
 
         finally:
-            # 5. Detach (device is guaranteed non-None here)
-            subprocess.run(["hdiutil", "detach", device], check=True)
+            # 5. Detach whenever the device is known.
+            if device is not None:
+                subprocess.run(["hdiutil", "detach", device], check=True)
 
         # 6. Convert back to compressed format (ULMO = lzma)
         subprocess.run([

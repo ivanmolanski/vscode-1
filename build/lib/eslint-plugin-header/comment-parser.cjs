@@ -48,22 +48,22 @@ module.exports = function parse(headerText) {
         lines[lines.length - 1] = lines[lines.length - 1].slice(0, -2);
     } else {
         // Trim comment
-        lines = lines.map(function(line) {
+        lines = lines.map(function (line) {
             return line.slice(2);
         });
     }
 
     // Trim whitespace
-    lines = lines.map(function(line) {
+    lines = lines.map(function (line) {
         return line.trim();
     });
 
     let eol = "\n";
-    if (lines.every(function(line) {
+    if (lines.every(function (line) {
         return line.startsWith("/") && line.endsWith("/");
     })) {
         // Could be a regex, convert to RegExp objects
-        lines = lines.map(function(line) {
+        lines = lines.map(function (line) {
             return {
                 pattern: line.slice(1, -1)
             };
