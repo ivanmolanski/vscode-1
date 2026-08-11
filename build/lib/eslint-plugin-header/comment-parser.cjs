@@ -1,9 +1,13 @@
-// Vendored from eslint-plugin-header v3.1.1 (MIT).
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 "use strict";
 
 module.exports = function parse(headerText) {
-    var lines = headerText.split(/\r?\n/);
-    var commentType = "line";
+    let lines = headerText.split(/\r?\n/);
+    let commentType = "line";
     if (lines[0].substr(0, 2) === "/*") {
         commentType = "block";
         // Trim open comment
@@ -22,7 +26,7 @@ module.exports = function parse(headerText) {
         return line.trim();
     });
 
-    var eol = "\n";
+    let eol = "\n";
     if (lines.every(function(line) {
         return line.startsWith("/") && line.endsWith("/");
     })) {
@@ -38,7 +42,7 @@ module.exports = function parse(headerText) {
             lines[lines.length - 1].pattern = lines[lines.length - 1].pattern.slice(0, -2);
             // Add new line to single-line patterns so they match at the end
             // of the header
-            var lastLine = lines[lines.length - 1].pattern;
+            const lastLine = lines[lines.length - 1].pattern;
             lines[lines.length - 1].pattern = lastLine + "(?:\r?\n)*$";
         } else {
             commentType = "block";

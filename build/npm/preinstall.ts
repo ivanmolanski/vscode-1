@@ -71,7 +71,7 @@ if (process.platform === 'win32') {
 			'\x1b[1;31m*** If you have Visual Studio installed in a custom location, you can specify it via the environment variable:\x1b[0;0m'
 		);
 		console.error(
-			'\x1b[1;31m*** set vs2022_install=<path> (or vs2019_install for older versions)\x1b[0;0m'
+			'\x1b[1;31m*** set vs2022_install=<path> (or a matching vs<year>_install variable for your version)\x1b[0;0m'
 		);
 		throw new Error();
 	}
@@ -93,6 +93,28 @@ function hasSupportedVisualStudioVersion(): boolean {
 	// https://source.chromium.org/chromium/chromium/src/+/master:build/vs_toolchain.py;l=140-175
 	const supportedVersions = ['2022', '2019'];
 
+	const vsTypes = [
+		'Enterprise',
+		'Professional',
+		'Community',
+		'Preview',
+		'BuildTools',
+		'IntPreview'
+	];
+
+	const programFiles86Path = process.env['ProgramFiles(x86)'];
+	const programFiles64Path = process.env['ProgramFiles'];
+
+	// Honor every explicit vs<year>_install override, not just the two known
+	// years. Custom install paths may point at any VS release line.
+	for (const [environmentVariable, vsPath] of Object.entries(process.env)) {
+		if (environmentVariable.startsWith('vs') && environmentVariable.endsWith('_install')) {
+			if (vsPath && fs.existsSync(vsPath)) {
+				return true;
+			}
+		}
+	}
+
 	for (const version of supportedVersions) {
 		// Check environment variable first (explicit override).
 		const environmentVariable = `vs${version}_install`;
@@ -103,18 +125,6 @@ function hasSupportedVisualStudioVersion(): boolean {
 		}
 
 		// Check default installation paths.
-		const programFiles86Path = process.env['ProgramFiles(x86)'];
-		const programFiles64Path = process.env['ProgramFiles'];
-
-		const vsTypes = [
-			'Enterprise',
-			'Professional',
-			'Community',
-			'Preview',
-			'BuildTools',
-			'IntPreview'
-		];
-
 		if (programFiles64Path) {
 			vsPath = path.join(
 				programFiles64Path,
@@ -135,6 +145,32 @@ function hasSupportedVisualStudioVersion(): boolean {
 			);
 
 			if (vsTypes.some(vsType => fs.existsSync(path.join(vsPath!, vsType)))) {
+				return true;
+			}
+		}
+	}
+
+	// Also accept newer Visual Studio release lines (e.g. VS 2026 / v18). Node-gyp
+	// itself discovers these fine, so scan any versioned directory under
+	// "Microsoft Visual Studio" for a known VS type (Community, Professional,
+	// Enterprise, Preview, BuildTools, IntPreview).
+	for (const programFilesPath of [programFiles64Path, programFiles86Path]) {
+		if (!programFilesPath) {
+			continue;
+		}
+
+		const vsRoot = path.join(programFilesPath, 'Microsoft Visual Studio');
+
+		if (!fs.existsSync(vsRoot)) {
+			continue;
+		}
+
+		for (const entry of fs.readdirSync(vsRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory()) {
+				continue;
+			}
+
+			if (vsTypes.some(vsType => fs.existsSync(path.join(vsRoot, entry.name, vsType)))) {
 				return true;
 			}
 		}
@@ -171,14 +207,18 @@ function installHeaders(): void {
 		);
 	}
 
-	if (remote !== undefined) {
-		// Both disturl and target come from a file checked into our repository.
-		child_process.execFileSync(
-			nodeGyp,
-			['install', '--dist-url', remote.disturl, remote.target],
-			{ shell: true }
-		);
-	}
+	const remoteDistUrl = remote?.disturl ?? 'https://nodejs.org/dist';
+
+	// Always build the remote native modules against the node version that is
+	// actually running this machine/build, rather than a version pinned in
+	// remote/.npmrc. This keeps local builds on the latest runtime.
+	const remoteTarget = process.versions.node;
+
+	child_process.execFileSync(
+		nodeGyp,
+		['install', '--dist-url', remoteDistUrl, remoteTarget],
+		{ shell: true }
+	);
 
 	// Overlay any custom headers shipped in build/npm/gyp/custom-headers
 	// on top of the downloaded Electron headers. This is used to work
@@ -249,6 +289,12 @@ function getLocalHeaderPath(target: string): string | undefined {
 function getHeaderInfo(
 	rcFile: string
 ): { disturl: string; target: string } | undefined {
+	// Tolerate a missing .npmrc: header installation is best-effort and must
+	// not block `npm install` when the file has been removed.
+	if (!fs.existsSync(rcFile)) {
+		return undefined;
+	}
+
 	const lines = fs.readFileSync(rcFile, 'utf8').split(/\r\n|\n/g);
 
 	let disturl: string | undefined;

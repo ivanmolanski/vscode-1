@@ -7,6 +7,12 @@
 # Modifications to this file require sign-off from the CODEOWNERS.
 #
 # Lines starting with `#` are comments. Blank lines are ignored.
+#
+# Fork exception: these two vendored CJS files are a patched fork of
+# eslint-plugin-header v3.1.1 (upstream unmaintained; ESLint 10 removed
+# context.getSourceCode()). They must stay CommonJS because they run in
+# the ESLint Node process, and the plugin is loaded from the header.cjs
+# entry point. They are not new project code.
 
 .github/skills/heap-snapshot-analysis/helpers/streamSnapshot.mjs
 .vscode-test.js
@@ -158,3 +164,5 @@ test/unit/electron/renderer.js
 test/unit/fullJsonStreamReporter.js
 test/unit/node/index.js
 test/unit/reporter.js
+build/lib/eslint-plugin-header/header.cjs
+build/lib/eslint-plugin-header/comment-parser.cjs

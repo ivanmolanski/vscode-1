@@ -34,6 +34,9 @@ def patch_dmg_icon(dmg_path, new_icon_path):
             device = entity["dev-entry"]
             break
 
+    if mount_point is None or device is None:
+        raise RuntimeError("Failed to locate mount point for attached DMG")
+
     try:
         # 3. Copy custom icon
         icon_target = os.path.join(mount_point, ".VolumeIcon.icns")

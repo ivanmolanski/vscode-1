@@ -1,7 +1,8 @@
-// Vendored fork of eslint-plugin-header v3.1.1 (https://github.com/Stuk/eslint-plugin-header)
-// Upstream is unmaintained (last publish 2022) and uses `context.getSourceCode()`,
-// which ESLint 10 removed. This copy migrates those calls to `context.sourceCode`
-// so the header rule keeps working on the latest ESLint. License: MIT.
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 'use strict';
 
 const commentParser = require('./comment-parser.cjs');
@@ -34,13 +35,15 @@ function getLeadingComments(context, node) {
 	if (all[0].type.toLowerCase() === 'block') {
 		return [all[0]];
 	}
+	let lastLineCommentIndex = 1;
 	for (let i = 1; i < all.length; ++i) {
 		const txt = context.sourceCode.getText().slice(all[i - 1].range[1], all[i].range[0]);
 		if (!txt.match(/^(\r\n|\r|\n)$/)) {
 			break;
 		}
+		lastLineCommentIndex = i + 1;
 	}
-	return all.slice(0, i);
+	return all.slice(0, lastLineCommentIndex);
 }
 
 function genCommentBody(commentType, textArray, eol, numNewlines) {
@@ -131,7 +134,7 @@ module.exports = {
 			},
 			create: function (context) {
 				let options = context.options;
-				let numNewlines = options.length > 2 ? options[2] : 1;
+				const numNewlines = options.length > 2 ? options[2] : 1;
 				const eol = getEOL(options);
 
 				// If just one option then read comment from file
