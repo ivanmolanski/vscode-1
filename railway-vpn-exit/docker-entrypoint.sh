@@ -14,6 +14,16 @@ set -e
 WG_INTERFACE="${WG_INTERFACE:-wg0}"
 EXIT_NODE_NAME="${EXIT_NODE_NAME:-railway-vpn-exit}"
 
+# Enable IPv4 and IPv6 kernel IP forwarding. Required for this node to act as
+# an exit node (route traffic for other tailnet devices). Must happen before
+# `tailscale up --advertise-exit-node`.
+if [ -f /proc/sys/net/ipv4/ip_forward ]; then
+	echo 1 > /proc/sys/net/ipv4/ip_forward
+fi
+if [ -f /proc/sys/net/ipv6/conf/all/forwarding ]; then
+	echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+fi
+
 echo "[entrypoint] Starting AirVPN + Tailscale exit node..."
 
 # --- 1. WireGuard (AirVPN) ---------------------------------------------------
@@ -38,7 +48,12 @@ if [ -z "$TS_AUTHKEY" ]; then
 	exit 1
 fi
 
-# Start tailscaled in the background (no systemd)
+# Start tailscaled in the background (no systemd).
+#
+# The state file lives on a Railway Volume mounted at /var/lib/tailscale so
+# the node identity survives redeploys. Use a NON-EPHEMERAL Tailscale auth
+# key for this long-lived exit node; an ephemeral key would discard the node
+# (and its exit-node approval) on every restart.
 nohup tailscaled \
 	--state=/var/lib/tailscale/tailscaled.state \
 	--socket=/var/run/tailscale/tailscaled.sock \
