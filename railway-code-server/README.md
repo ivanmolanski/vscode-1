@@ -60,6 +60,33 @@ instead of surfacing later inside the running container.
 6. **Domain** — add `code-server.up.railway.app` or a custom domain → generates
    an HTTPS URL for the GUI.
 
+## VPN exit-node egress (AirVPN via Oracle)
+
+The `code-server` service egresses through the `tailscale-vpn` sibling service's
+userspace SOCKS5/HTTP proxy, which routes through a Tailscale exit node (the
+Oracle VPS AirVPN gateway). This is wired via Railway **reference variables**
+that resolve the sibling service's private domain dynamically:
+
+| Variable | Value |
+|----------|-------|
+| `ALL_PROXY` | `socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055` |
+| `HTTP_PROXY` | `http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055` |
+| `HTTPS_PROXY` | `http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055` |
+
+```bash
+railway variable set \
+  'ALL_PROXY=socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
+  'HTTP_PROXY=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
+  'HTTPS_PROXY=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
+  --service code-server
+```
+
+Verify egress exits through AirVPN (returns the AirVPN public IP, not Railway's):
+
+```bash
+railway ssh --service code-server "curl -4 http://api.ipify.org"
+```
+
 ## After deploy
 
 1. Open the generated `*.up.railway.app` URL, sign in with `PASSWORD`.

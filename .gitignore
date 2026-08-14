@@ -49,3 +49,5 @@ dist
 .github/prompts/*.local.prompt.md
 .agents/skills/.local/
 .github/skills/.local/
+# Separate nested repo (own remote/history); not part of this repository
+/railway_tailscale_vpn_fork/
