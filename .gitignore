@@ -51,3 +51,23 @@ dist
 .github/skills/.local/
 # Separate nested repo (own remote/history); not part of this repository
 /railway_tailscale_vpn_fork/
+
+# --- Secrets / credentials (NEVER commit) ---
+# Oracle Cloud / OCI API keys
+*.pem
+!**/test/fixtures/*.pem
+!**/fixtures/*.pem
+# WireGuard / VPN private configs
+*.conf
+!**/test/fixtures/*.conf
+# Private keys
+*.key
+*.p12
+*.pfx
+# Tailscale auth keys
+*tskey*
+# Console / shell history logs that may contain secrets
+console-history-*.log
+# OCI key material
+oci_public_key.pem
+oci_api_key.pem
