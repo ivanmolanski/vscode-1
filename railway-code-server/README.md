@@ -65,26 +65,46 @@ instead of surfacing later inside the running container.
 The `code-server` service egresses through the `tailscale-vpn` sibling service's
 userspace SOCKS5/HTTP proxy, which routes through a Tailscale exit node (the
 Oracle VPS AirVPN gateway). This is wired via Railway **reference variables**
-that resolve the sibling service's private domain dynamically:
+that resolve the sibling service's private domain dynamically. Port `1055`
+simultaneously serves both SOCKS5 and HTTP CONNECT — the `tailscaled`
+`--socks5-server`/`--outbound-http-proxy-listen` listeners are multiplexed on
+one port via `proxymux`. The reference URL scheme below (`socks5h://` for
+SOCKS5, `http://` for HTTP) works with both.
 
-| Variable | Value |
-|----------|-------|
-| `ALL_PROXY` | `socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055` |
-| `HTTP_PROXY` | `http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055` |
-| `HTTPS_PROXY` | `http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055` |
+Set the proxy variables on `code-server` in the **same Railway project and
+environment** as the `tailscale-vpn` service. Explicitly pass `--environment`
+(or ensure your active `railway link` targets the correct environment), since a
+stale link to another environment would make
+`${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}` reference variables and the
+`tailscale-vpn.railway.internal` DNS name unresolvable:
 
 ```bash
 railway variable set \
+  --environment production \
   'ALL_PROXY=socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
+  'all_proxy=socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
   'HTTP_PROXY=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
+  'http_proxy=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
   'HTTPS_PROXY=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
+  'https_proxy=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
   --service code-server
 ```
 
-Verify egress exits through AirVPN (returns the AirVPN public IP, not Railway's):
+These variables only take effect for clients that honor them (e.g. `curl`,
+`wget`, Go, Node/`fetch` where supported). They are **not** a service-wide
+egress guarantee — applications that ignore `*_proxy`/`NO_PROXY` conventions
+will still connect over Railway's normal network. If you want the whole
+container to egress via the exit node, run your app under a wrapper that forces
+the proxy, or set this at the process level.
+
+Verify egress exits through AirVPN (returns the AirVPN public IP, not Railway's).
+Clear `NO_PROXY`/`no_proxy` so the request cannot bypass the configured proxy,
+and use HTTPS to exercise the CONNECT path. `railway ssh` runs in the same
+project/environment as the linked service:
 
 ```bash
-railway ssh --service code-server "curl -4 http://api.ipify.org"
+railway ssh --service code-server \
+  "NO_PROXY= no_proxy= curl -fsS --max-time 25 https://api.ipify.org"
 ```
 
 ## After deploy
