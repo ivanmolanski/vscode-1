@@ -76,7 +76,9 @@ else
 fi
 
 # Kill any stale tunnel from a previous container restart
-pkill -f 'ssh -D.*$TUNNEL_HOST' 2>/dev/null || true
+# Double quotes let the shell expand TUNNEL_HOST before pkill sees the
+# pattern, so it matches the ssh dynamic-forward command line actually running.
+pkill -f "ssh -D.*${TUNNEL_HOST}" 2>/dev/null || true
 
 # Start the tunnel if VPS_SSH_KEY was provided and key file exists
 tunnel_ok=false
