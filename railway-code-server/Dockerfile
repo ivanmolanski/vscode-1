@@ -200,10 +200,13 @@ COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 # The VCN security list only allows inbound port 22, so we open an
 # ssh -D tunnel from inside the container to the VPS where Dante routes
 # traffic through AirVPN. ALL_PROXY points to localhost:1080 (the tunnel).
+# Privoxy provides an HTTP proxy on :8118 that forwards to the SOCKS5
+# tunnel, for applications (like Node.js/Copilot) that don't honor socks5h://.
 # ---------------------------------------------------------------------------
 RUN apt-get update && \
 	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-	autossh && \
+	autossh \
+	privoxy && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/*
 

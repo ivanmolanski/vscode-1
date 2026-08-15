@@ -110,21 +110,29 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 fi
 
 if [ "$tunnel_ok" = true ]; then
-	# Route all outbound traffic through the AirVPN tunnel
+	# Start privoxy as HTTP→SOCKS5 bridge for Node.js/Copilot
+	# curl/git honor SOCKS5 directly via ALL_PROXY, but Node.js fetch needs HTTP proxy
+	mkdir -p /run/privoxy
+	cat > /tmp/privoxy.conf << PROXYEOF
+listen-address 127.0.0.1:8118
+listen-address [::1]:8118
+forward-socks5 / 127.0.0.1:${TUNNEL_PORT} .
+toggle 0
+PROXYEOF
+	/usr/sbin/privoxy --no-daemon /tmp/privoxy.conf &
+	PRIVOXY_PID=$!
+	sleep 1
+
+	# Set SOCKS5 proxy for curl/git (direct support)
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
-	export HTTP_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
-	export HTTPS_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
+	# Set HTTP proxy for Node.js/Copilot (privoxy bridges to SOCKS5)
+	export HTTP_PROXY="http://127.0.0.1:8118"
+	export HTTPS_PROXY="http://127.0.0.1:8118"
 	export http_proxy="$HTTP_PROXY"
 	export https_proxy="$HTTPS_PROXY"
 	# Do NOT proxy Railway internal traffic or localhost
 	export NO_PROXY="localhost,127.0.0.1,::1,.railway.internal,10.0.0.0/8,.svc,.cluster.local,.internal"
 	export no_proxy="$NO_PROXY"
-	# Configure glibc to prefer IPv4 for connections (ensures tunnel handles all traffic)
-	# This prevents IPv6 DNS bypass that would skip the SOCKS proxy
-	if [ -f /etc/gai.conf ]; then
-		grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null || \
-			echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf
-	fi
 else
 	if [ -n "${VPS_SSH_KEY:-}" ]; then
 		echo "CRITICAL: AirVPN tunnel failed to establish — exiting" >&2
