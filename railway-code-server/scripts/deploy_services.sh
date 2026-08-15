@@ -13,10 +13,12 @@ echo "=== Deploying hardened service units ==="
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/danted.service" ]; then
     cp "$SCRIPT_DIR/danted.service" /etc/systemd/system/danted.service
-elif [ -f /tmp/danted.service ]; then
-    cp /tmp/danted.service /etc/systemd/system/danted.service
+    echo "Installed danted.service from $SCRIPT_DIR/danted.service"
+elif [ -f /etc/systemd/system/danted.service ]; then
+    echo "Using existing /etc/systemd/system/danted.service"
 else
-    echo "WARN: danted.service not found in script dir or /tmp, skipping"
+    echo "ERROR: danted.service not found in $SCRIPT_DIR — cannot continue" >&2
+    exit 1
 fi
 
 # --- 2. VPN Health Watchdog service ---

@@ -75,12 +75,15 @@ if __name__ == "__main__":
 
     existing_rules = list(sl_data.ingress_security_rules)
 
-    # Check if port 1080 already covered
+    # Check if port 1080 already covered with matching source CIDR
     has_1080 = False
     for rule in existing_rules:
         if covers_port_1080(rule):
-            has_1080 = True
-            print(f"Port 1080 already covered by rule: {rule.source} (protocol={rule.protocol})")
+            if rule.source == SOURCE_CIDR:
+                has_1080 = True
+                print(f"Port 1080 already covered by matching rule: {rule.source} (protocol={rule.protocol})")
+            else:
+                print(f"WARNING: Port 1080 covered by rule {rule.source} but expected {SOURCE_CIDR} — will add correct rule")
 
     if has_1080:
         print("Done. Port 1080 already present.")

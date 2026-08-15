@@ -15,6 +15,19 @@ IMDS_BASE = "http://169.254.169.254/opc/v2"
 SOURCE_CIDR = os.environ.get("ALLOWED_SOURCE_CIDR", "0.0.0.0/0")
 
 
+def covers_port_1080(rule):
+    """Check if an ingress rule covers TCP port 1080."""
+    if rule.protocol is None or rule.protocol == "all":
+        return True
+    if rule.protocol == "6" and (rule.tcp_options is None or rule.tcp_options.destination_port_range is None):
+        return True
+    if rule.tcp_options and rule.tcp_options.destination_port_range:
+        pr = rule.tcp_options.destination_port_range
+        if pr.min <= 1080 <= pr.max:
+            return True
+    return False
+
+
 def imds_get(path):
     req = urllib.request.Request(
         f"{IMDS_BASE}{path}",
@@ -84,21 +97,18 @@ for sl_id in target_sl_ids:
     print(f"\nSecurity List: {sl_data.display_name} ({sl_data.id})")
 
     has_1080 = False
+    has_matching_source = False
     existing_rules = list(sl_data.ingress_security_rules)
     for rule in existing_rules:
-        if rule.tcp_options and rule.tcp_options.destination_port_range:
-            pr = rule.tcp_options.destination_port_range
-            if pr.min <= 1080 <= pr.max:
+        if covers_port_1080(rule):
+            if rule.source == SOURCE_CIDR:
                 has_1080 = True
-                print(f"  Port 1080 already allowed: {rule.source}:{pr.min}-{pr.max}")
-        elif rule.protocol is None or rule.protocol == "all":
-            has_1080 = True
-            print(f"  Port 1080 covered by all-protocol rule: {rule.source}")
-        elif rule.protocol == "6":
-            has_1080 = True
-            print(f"  Port 1080 covered by unrestricted TCP rule: {rule.source}")
+                has_matching_source = True
+                print(f"  Port 1080 already allowed with correct source: {rule.source}")
+            else:
+                print(f"  WARNING: Port 1080 covered by {rule.source} but expected {SOURCE_CIDR} — will add correct rule")
 
-    if has_1080:
+    if has_1080 and has_matching_source:
         success = True
         continue
 

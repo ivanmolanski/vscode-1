@@ -31,31 +31,46 @@ fi
 # --- Check 3: VPN egress IP is AirVPN (not VPS local IP) ---
 # Only test egress if Dante is listening
 if ss -tlnp | grep -q ':1080 '; then
-    VPN_IP=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
-    if [ "$VPN_IP" = "TIMEOUT" ]; then
+    VPN_IP=$(curl -sS --fail --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null)
+    VPN_CURL_RC=$?
+    if [ "$VPN_CURL_RC" -ne 0 ] || [ -z "$VPN_IP" ]; then
         # Retry once after brief pause
         sleep 3
-        VPN_IP=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
+        VPN_IP=$(curl -sS --fail --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null)
+        VPN_CURL_RC=$?
     fi
     EXPECTED_IP="104.254.90.235"
+    if [ "$VPN_CURL_RC" -ne 0 ] || [ -z "$VPN_IP" ]; then
+        # curl failed entirely — treat as proxy/Dante issue, not Eddie
+        VPN_IP="TIMEOUT"
+    fi
     if [ "$VPN_IP" != "$EXPECTED_IP" ]; then
         log "VPN EGRESS WRONG ($VPN_IP != $EXPECTED_IP) — restarting danted"
         systemctl restart danted.service
         sleep 5
         # Fresh egress check after Dante restart
-        VPN_POST=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
-        if [ "$VPN_POST" = "TIMEOUT" ]; then
+        VPN_POST=$(curl -sS --fail --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null)
+        VPN_POST_RC=$?
+        if [ "$VPN_POST_RC" -ne 0 ] || [ -z "$VPN_POST" ]; then
             sleep 3
-            VPN_POST=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
+            VPN_POST=$(curl -sS --fail --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null)
+            VPN_POST_RC=$?
         fi
-        # Only restart eddie if post-Dante check shows wrong IP (not a Dante/proxy issue)
+        # Classify: only a valid non-TIMEOUT mismatch means Eddie is wrong
+        if [ "$VPN_POST_RC" -ne 0 ] || [ -z "$VPN_POST" ]; then
+            VPN_POST="TIMEOUT"
+        fi
         if [ "$VPN_POST" != "$EXPECTED_IP" ] && [ "$VPN_POST" != "TIMEOUT" ]; then
             log "Restarting eddie for wrong egress IP (post-Dante: $VPN_POST)"
             systemctl restart eddie.service
             sleep 8
         fi
         # Final re-verify
-        VPN_IP2=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
+        VPN_IP2=$(curl -sS --fail --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null)
+        VPN_IP2_RC=$?
+        if [ "$VPN_IP2_RC" -ne 0 ] || [ -z "$VPN_IP2" ]; then
+            VPN_IP2="TIMEOUT"
+        fi
         if [ "$VPN_IP2" != "$EXPECTED_IP" ]; then
             log "CRITICAL: VPN still broken after restart ($VPN_IP2)"
         else

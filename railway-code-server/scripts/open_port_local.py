@@ -6,6 +6,20 @@ import sys
 
 SOURCE_CIDR = os.environ.get("ALLOWED_SOURCE_CIDR", "0.0.0.0/0")
 
+
+def covers_port_1080(rule):
+    """Check if an ingress rule covers TCP port 1080."""
+    if rule.protocol is None or rule.protocol == "all":
+        return True
+    if rule.protocol == "6" and (rule.tcp_options is None or rule.tcp_options.destination_port_range is None):
+        return True
+    if rule.tcp_options and rule.tcp_options.destination_port_range:
+        pr = rule.tcp_options.destination_port_range
+        if pr.min <= 1080 <= pr.max:
+            return True
+    return False
+
+
 # Load config from default OCI config location (~/.oci/config)
 config = oci.config.from_file(profile_name="DEFAULT")
 print(f"Region: {config['region']}")
@@ -17,11 +31,14 @@ compute_client = oci.core.ComputeClient(config)
 # Resolve target security lists via VNIC attachment → subnet
 target_sl_ids = set()
 try:
+    # List all VNIC attachments for the tenancy, filter to attached state
     attachments = oci.pagination.list_call_get_all_results(
         compute_client.list_vnic_attachments,
         compartment_id=config["tenancy"],
     )
     for att in attachments.data:
+        if att.lifecycle_state != "ATTACHED":
+            continue
         if att.subnet_id:
             subnet = net_client.get_subnet(att.subnet_id).data
             target_sl_ids.update(subnet.security_list_ids or [])
@@ -45,20 +62,18 @@ for sl_id in target_sl_ids:
     print(f"  Security List: {sl_data.display_name} ({sl_data.id})")
 
     has_1080 = False
+    has_matching_source = False
     existing_rules = list(sl_data.ingress_security_rules)
     for rule in existing_rules:
-        if rule.tcp_options and rule.tcp_options.destination_port_range:
-            if rule.tcp_options.destination_port_range.min <= 1080 <= rule.tcp_options.destination_port_range.max:
+        if covers_port_1080(rule):
+            if rule.source == SOURCE_CIDR:
                 has_1080 = True
-                print(f"    Port 1080 already allowed!")
-        elif rule.protocol is None or rule.protocol == "all":
-            has_1080 = True
-            print(f"    Port 1080 covered by all-protocol rule!")
-        elif rule.protocol == "6":
-            has_1080 = True
-            print(f"    Port 1080 covered by unrestricted TCP rule!")
+                has_matching_source = True
+                print(f"    Port 1080 already allowed with correct source: {rule.source}")
+            else:
+                print(f"    WARNING: Port 1080 covered by {rule.source} but expected {SOURCE_CIDR}")
 
-    if not has_1080:
+    if not has_1080 or not has_matching_source:
         print(f"    Adding TCP 1080 ingress rule...")
         existing_rules.append(
             oci.core.models.IngressSecurityRule(
