@@ -36,6 +36,7 @@ ExecStart=/usr/lib/eddie-cli/eddie-cli \
     -dns.check=True \
     -netlock=False \
     -netlock.connection=False \
+    -netlock.mode=none \
     -log.file.enabled=True \
     -log.file.path=/var/log/eddie/eddie.log \
     -ui.skip.promotional=True \

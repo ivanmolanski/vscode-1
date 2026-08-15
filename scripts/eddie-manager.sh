@@ -4,52 +4,18 @@ set -euo pipefail
 LOG_FILE="/var/log/eddie/eddie.log"
 
 start() {
-    echo "[INFO] Starting Eddie CLI..."
-    if pgrep -f "eddie-cli" >/dev/null 2>&1; then
-        echo "[WARN] Eddie is already running."
-        exit 0
-    fi
-    /usr/bin/eddie-cli \
-        -batch \
-        -connect \
-        -login=allcaps \
-        -password=cxz21cxz \
-        -server=Chort \
-        -mode.type=wireguard \
-        -mode.protocol=udp \
-        -network.entry.iplayer=ipv4-ipv6 \
-        -network.ipv4.mode=in \
-        -network.ipv6.mode=in \
-        -network.ipv4.autoswitch=True \
-        -network.ipv6.autoswitch=True \
-        -wireguard.interface.mtu=1320 \
-        -dns.mode=auto \
-        -dns.check=True \
-        -netlock=False \
-        -netlock.connection=False \
-        -log.file.enabled=True \
-        -log.file.path="$LOG_FILE" \
-        -ui.skip.promotional=True \
-        -ui.skip.netlock.confirm=True \
-        -updater.channel=none
+    echo "[INFO] Starting Eddie service (systemctl start eddie.service)..."
+    systemctl start eddie.service
 }
 
 stop() {
-    echo "[INFO] Stopping Eddie CLI cleanly..."
-    pkill -TERM -f "eddie-cli" || true
-    sleep 2
-    if pgrep -f "eddie-cli" >/dev/null 2>&1; then
-        echo "[INFO] Sending SIGKILL to remaining eddie-cli processes..."
-        pkill -KILL -f "eddie-cli" || true
-    fi
-    if pgrep -f "eddie-cli-elevated" >/dev/null 2>&1; then
-        echo "[INFO] Sending SIGKILL to remaining eddie-cli-elevated processes..."
-        pkill -KILL -f "eddie-cli-elevated" || true
-    fi
-    echo "[INFO] Eddie stopped."
+    echo "[INFO] Stopping Eddie service (systemctl stop eddie.service)..."
+    systemctl stop eddie.service
 }
 
 status() {
+    echo "=== Service Unit Status ==="
+    systemctl status eddie.service --no-pager || true
     echo "=== Processes ==="
     ps aux | grep -E 'eddie-cli' | grep -v grep || echo "No eddie processes active."
     echo "=== Interfaces ==="
