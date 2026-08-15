@@ -8,8 +8,11 @@ echo ""
 echo "=== CHECKING EXISTING LISTENER ==="
 if ss -tlnp | grep -q ':8118 '; then
     echo "Privoxy already listening on :8118"
-    CURL_OUT=$(curl -sS --max-time 3 --proxy http://127.0.0.1:8118 https://api.ipify.org 2>&1)
-    CURL_RC=$?
+    if CURL_OUT=$(curl -sS --max-time 3 --proxy http://127.0.0.1:8118 https://api.ipify.org 2>&1); then
+        CURL_RC=0
+    else
+        CURL_RC=$?
+    fi
     echo "Proxy test result: $CURL_OUT"
     exit $CURL_RC
 else
@@ -18,8 +21,11 @@ else
     PRIVOXY_PID=$!
     trap "kill $PRIVOXY_PID 2>/dev/null" EXIT
     sleep 2
-    CURL_OUT=$(curl -sS --max-time 3 --proxy http://127.0.0.1:8118 https://api.ipify.org 2>&1)
-    CURL_RC=$?
+    if CURL_OUT=$(curl -sS --max-time 3 --proxy http://127.0.0.1:8118 https://api.ipify.org 2>&1); then
+        CURL_RC=0
+    else
+        CURL_RC=$?
+    fi
     echo "Proxy test result: $CURL_OUT"
     exit $CURL_RC
 fi

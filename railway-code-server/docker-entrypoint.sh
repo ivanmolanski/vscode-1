@@ -126,7 +126,7 @@ PROXYEOF
 	PRIVOXY_PID=$!
 	# Poll for privoxy readiness instead of blind sleep
 	for i in $(seq 1 10); do
-		if kill -0 $PRIVOXY_PID 2>/dev/null && curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 https://api.ipify.org >/dev/null 2>&1; then
+		if kill -0 $PRIVOXY_PID 2>/dev/null && curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
 			break
 		fi
 		sleep 0.5
@@ -135,7 +135,7 @@ PROXYEOF
 		echo "CRITICAL: Privoxy failed to start — exiting" >&2
 		exit 1
 	fi
-	if ! curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
+	if ! curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
 		echo "CRITICAL: Privoxy not reachable on :8118 — exiting" >&2
 		kill $PRIVOXY_PID 2>/dev/null
 		exit 1

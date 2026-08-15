@@ -6,12 +6,16 @@ import json
 import sys
 import urllib.request
 
-signer = InstancePrincipalsSecurityTokenSigner()
+# Signer construction may also hit IMDS (federation endpoint), so build it
+# inside the same bounded retry path as the metadata request.
+signer = None
 
 # Fetch instance metadata with timeout and retry
 inst = None
 for attempt in range(3):
     try:
+        if signer is None:
+            signer = InstancePrincipalsSecurityTokenSigner()
         req = urllib.request.Request(
             "http://169.254.169.254/opc/v2/instance/",
             headers={"Authorization": "Bearer Oracle"},
@@ -44,11 +48,9 @@ for v in vcns.data:
             if rule.protocol == "17" and rule.udp_options and rule.udp_options.destination_port_range:
                 pr = rule.udp_options.destination_port_range
                 port = f"{pr.min}-{pr.max}"
-            elif rule.tcp_options and rule.tcp_options.destination_port_range:
+            elif rule.protocol == "6" and rule.tcp_options and rule.tcp_options.destination_port_range:
                 pr = rule.tcp_options.destination_port_range
                 port = f"{pr.min}-{pr.max}"
-            elif proto in ("17", "6"):
-                port = "n/a"
             else:
-                port = "all"
+                port = "all"  # omitted destination range means all ports for that protocol
             print(f"    {rule.source} -> proto={proto} port={port}")
