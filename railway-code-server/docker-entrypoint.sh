@@ -53,11 +53,13 @@ chown -R abc:abc /config 2>/dev/null || true
 export PATH="/usr/local/bin:$PATH"
 
 # ---------------------------------------------------------------------------
-# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443)
-# Railway blocks outbound port 22. VPS sshd listens on port 443 as workaround.
+# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS
+# Port 22 proven working (Railway egress reached 140.238.139.20:22 at deploy
+# 19:21 UTC 2026-08-15). Force IPv4: AddressFamily=any broke the tunnel by
+# preferring broken IPv6 routes. VPS sshd listens on 22 AND 443 for failover.
 # ---------------------------------------------------------------------------
 TUNNEL_HOST="140.238.139.20"
-TUNNEL_SSH_PORT=${VPS_SSH_PORT:-443}
+TUNNEL_SSH_PORT=${VPS_SSH_PORT:-22}
 TUNNEL_USER="ubuntu"
 TUNNEL_KEY="/tmp/tunnel_key"
 TUNNEL_PORT=1080
@@ -72,8 +74,10 @@ else
 	chmod 600 "$TUNNEL_KEY"
 fi
 
-# Kill any stale tunnel from a previous container restart
-pkill -f 'ssh -D.*$TUNNEL_HOST' 2>/dev/null || true
+# Kill any stale tunnel from a previous container restart (match on the
+# dynamic port in the command line so concurrent SSH listeners don't stall)
+# Escape properly so the shell expands $TUNNEL_HOST.
+pkill -f "ssh -D.*${TUNNEL_HOST}" 2>/dev/null || true
 
 # Start the tunnel if VPS_SSH_KEY was provided and key file exists
 tunnel_ok=false
@@ -99,6 +103,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 		-o ServerAliveInterval=30 \
 		-o ServerAliveCountMax=3 \
 		-o ExitOnForwardFailure=yes \
+		-o AddressFamily=inet \
 		-o ConnectTimeout=8 \
 		-p "${TUNNEL_SSH_PORT}" \
 		-i "$TUNNEL_KEY" \
@@ -121,7 +126,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 		-o ServerAliveInterval=30 \
 		-o ServerAliveCountMax=3 \
 		-o ExitOnForwardFailure=yes \
-		-o AddressFamily=any \
+		-o AddressFamily=inet \
 		-o ForwardTunnel=no \
 		-o ReverseTunnel=no \
 		-o ConnectTimeout=8 \
@@ -184,10 +189,9 @@ PROXYEOF
 	export no_proxy="$NO_PROXY"
 else
 	if [ -n "${VPS_SSH_KEY:-}" ]; then
-		echo "CRITICAL: AirVPN tunnel failed to establish — exiting" >&2
-		exit 1
+		echo "WARNING: AirVPN tunnel failed to establish — running WITHOUT proxy" >&2
 	fi
-	echo "WARNING: No tunnel key — running WITHOUT AirVPN" >&2
+	echo "WARNING: No tunnel — running code-server unprotected" >&2
 fi
 
 # Direct bind, password required
