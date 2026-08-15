@@ -53,13 +53,14 @@ chown -R abc:abc /config 2>/dev/null || true
 export PATH="/usr/local/bin:$PATH"
 
 # ---------------------------------------------------------------------------
-# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS
-# Port 22 proven working (Railway egress reached 140.238.139.20:22 at deploy
-# 19:21 UTC 2026-08-15). Force IPv4: AddressFamily=any broke the tunnel by
-# preferring broken IPv6 routes. VPS sshd listens on 22 AND 443 for failover.
+# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 22)
+# Proven working at 19:21 UTC (Railway egress 152.55.180.107 authed).
+# Keep this section byte-identical to the working deployment: no TCP probe,
+# no pre-flight ssh attempts, no AddressFamily override, no diagnostics.
+# NOTE: adding a raw TCP probe to :22 first makes sshd log 'banner exchange:
+# invalid format' and stales the following SSH handshake — do not add one.
 # ---------------------------------------------------------------------------
 TUNNEL_HOST="140.238.139.20"
-TUNNEL_SSH_PORT=${VPS_SSH_PORT:-22}
 TUNNEL_USER="ubuntu"
 TUNNEL_KEY="/tmp/tunnel_key"
 TUNNEL_PORT=1080
@@ -74,45 +75,13 @@ else
 	chmod 600 "$TUNNEL_KEY"
 fi
 
-# Kill any stale tunnel from a previous container restart (match on the
-# dynamic port in the command line so concurrent SSH listeners don't stall)
-# Escape properly so the shell expands $TUNNEL_HOST.
-pkill -f "ssh -D.*${TUNNEL_HOST}" 2>/dev/null || true
+# Kill any stale tunnel from a previous container restart
+pkill -f 'ssh -D.*$TUNNEL_HOST' 2>/dev/null || true
 
 # Start the tunnel if VPS_SSH_KEY was provided and key file exists
 tunnel_ok=false
 if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
-	echo "--- SSH Tunnel Diagnostics ---" >&2
-	echo "Key file size: $(wc -c < "$TUNNEL_KEY") bytes" >&2
-	echo "Key file permissions: $(stat -c %a "$TUNNEL_KEY" 2>/dev/null || stat -f %Lp "$TUNNEL_KEY" 2>/dev/null)" >&2
-	echo "Key first line: $(head -1 "$TUNNEL_KEY")" >&2
-	echo "Key last line: $(tail -1 "$TUNNEL_KEY")" >&2
-
-	# Test basic network connectivity to VPS
-	echo "Testing TCP connectivity to ${TUNNEL_HOST}:${TUNNEL_SSH_PORT}..." >&2
-	if timeout 5 bash -c "echo >/dev/tcp/${TUNNEL_HOST}/${TUNNEL_SSH_PORT}" 2>/dev/null; then
-		echo "TCP port ${TUNNEL_SSH_PORT} reachable" >&2
-	else
-		echo "WARNING: TCP port ${TUNNEL_SSH_PORT} NOT reachable" >&2
-	fi
-
-	# Test SSH connection directly (non-interactive, 10s timeout) to capture errors
-	echo "Testing SSH connection to ${TUNNEL_USER}@${TUNNEL_HOST}:${TUNNEL_SSH_PORT}..." >&2
-	timeout 10 ssh -v -N -o StrictHostKeyChecking=yes \
-		-o UserKnownHostsFile=/root/.ssh/known_hosts \
-		-o ServerAliveInterval=30 \
-		-o ServerAliveCountMax=3 \
-		-o ExitOnForwardFailure=yes \
-		-o AddressFamily=inet \
-		-o ConnectTimeout=8 \
-		-p "${TUNNEL_SSH_PORT}" \
-		-i "$TUNNEL_KEY" \
-		"${TUNNEL_USER}@${TUNNEL_HOST}" \
-		2>/tmp/ssh-diag.log || true
-	echo "SSH diagnostic log (last 30 lines):" >&2
-	head -30 /tmp/ssh-diag.log >&2 2>/dev/null || echo "(no log)" >&2
-
-	# Start autossh for the actual persistent tunnel
+	# autossh for auto-reconnect
 	# -M 0 : let ssh detect dead connections via ServerAliveInterval
 	# -f    : fork to background after auth
 	# -N    : no remote command
@@ -126,18 +95,14 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 		-o ServerAliveInterval=30 \
 		-o ServerAliveCountMax=3 \
 		-o ExitOnForwardFailure=yes \
-		-o AddressFamily=inet \
-		-o ForwardTunnel=no \
-		-o ReverseTunnel=no \
-		-o ConnectTimeout=8 \
-		-p "${TUNNEL_SSH_PORT}" \
+		-o ConnectTimeout=10 \
 		-i "$TUNNEL_KEY" \
 		-D "${TUNNEL_PORT}" \
 		"${TUNNEL_USER}@${TUNNEL_HOST}" \
 		2>>/tmp/airvpn-tunnel.log &
 
-	# Wait for the tunnel to come up (max 15s)
-	for i in $(seq 1 30); do
+	# Wait for the tunnel to come up (max 12s)
+	for i in $(seq 1 24); do
 		if curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
 			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}" >&2
 			tunnel_ok=true
