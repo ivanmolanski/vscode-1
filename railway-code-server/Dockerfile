@@ -200,15 +200,30 @@ COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 # The VCN security list only allows inbound port 22, so we open an
 # ssh -D tunnel from inside the container to the VPS where Dante routes
 # traffic through AirVPN. ALL_PROXY points to localhost:1080 (the tunnel).
-# Privoxy provides an HTTP proxy on :8118 that forwards to the SOCKS5
+# Privoxy 4.2.0 provides an HTTP proxy on :8118 that forwards to the SOCKS5
 # tunnel, for applications (like Node.js/Copilot) that don't honor socks5h://.
 # ---------------------------------------------------------------------------
 RUN apt-get update && \
 	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
 	autossh \
-	privoxy && \
-	apt-get clean && \
-	rm -rf /var/lib/apt/lists/*
+	autoconf \
+	libpcre2-dev \
+	libssl-dev \
+	zlib1g-dev \
+	build-essential \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
+
+# Build privoxy 4.2.0 from source (Ubuntu only ships 3.x)
+RUN cd /tmp && \
+	wget -q http://deb.debian.org/debian/pool/main/p/privoxy/privoxy_4.2.0.orig.tar.gz && \
+	tar xzf privoxy_4.2.0.orig.tar.gz && \
+	cd privoxy-4.2.0-stable && \
+	autoheader && autoconf && \
+	./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var && \
+	make -j$(nproc) && \
+	make install && \
+	rm -rf /tmp/privoxy-4.2.0-stable /tmp/privoxy_4.2.0.orig.tar.gz
 
 # Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var
 # (written to /tmp/tunnel_key by the entrypoint — never baked into the image)
