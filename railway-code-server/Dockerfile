@@ -206,6 +206,23 @@ RUN set -eux; \
 	su abc -s /bin/bash -c 'rustc --version && cargo --version'; \
 	echo "All toolchains OK"
 
+# ---------------------------------------------------------------------------
+# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 22 only)
+# The VCN security list only allows inbound port 22, so we open an
+# ssh -D tunnel from inside the container to the VPS where Dante routes
+# traffic through AirVPN. ALL_PROXY points to localhost:1080 (the tunnel).
+# ---------------------------------------------------------------------------
+RUN apt-get update && \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+	autossh && \
+	apt-get clean && \
+	rm -rf /var/lib/apt/lists/*
+
+# Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var
+# (written to /tmp/tunnel_key by the entrypoint — never baked into the image)
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+RUN ssh-keyscan -H 140.238.139.20 >> /root/.ssh/known_hosts 2>/dev/null
+
 EXPOSE 8443
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

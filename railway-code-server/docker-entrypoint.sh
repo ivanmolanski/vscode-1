@@ -52,6 +52,67 @@ chown -R abc:abc /config 2>/dev/null || true
 # /usr/local already on PATH, but explicit never hurts)
 export PATH="/usr/local/bin:$PATH"
 
+# ---------------------------------------------------------------------------
+# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 22 only)
+# ---------------------------------------------------------------------------
+TUNNEL_HOST="140.238.139.20"
+TUNNEL_USER="ubuntu"
+TUNNEL_KEY="/tmp/tunnel_key"
+TUNNEL_PORT=1080
+
+# Write SSH key from env var to file (never baked into image)
+if [ -z "${VPS_SSH_KEY:-}" ]; then
+	echo "WARNING: VPS_SSH_KEY not set — AirVPN tunnel will NOT start" >&2
+else
+	echo "$VPS_SSH_KEY" > "$TUNNEL_KEY"
+	chmod 600 "$TUNNEL_KEY"
+fi
+
+# Kill any stale tunnel from a previous container restart
+pkill -f 'ssh -D.*$TUNNEL_HOST' 2>/dev/null || true
+
+# Start the tunnel if key is available
+if [ -f "$TUNNEL_KEY" ]; then
+	# autossh for auto-reconnect
+	# -M 0 : let ssh detect dead connections via ServerAliveInterval
+	# -f    : fork to background after auth
+	# -N    : no remote command
+	# -D    : dynamic SOCKS5 forwarding
+	export AUTOSSH_PIDFILE=/tmp/airvpn-tunnel.pid
+	export AUTOSSH_LOGFILE=/tmp/airvpn-tunnel.log
+	export AUTOSSH_PORT=0
+	nohup autossh -M 0 -f -N \
+		-o StrictHostKeyChecking=no \
+		-o ServerAliveInterval=30 \
+		-o ServerAliveCountMax=3 \
+		-o ExitOnForwardFailure=yes \
+		-i "$TUNNEL_KEY" \
+		-D "${TUNNEL_PORT}" \
+		"${TUNNEL_USER}@${TUNNEL_HOST}" \
+		2>>/tmp/airvpn-tunnel.log &
+
+	# Wait for the tunnel to come up (max 10s)
+	for i in $(seq 1 20); do
+		if curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
+			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}" >&2
+			break
+		fi
+		sleep 0.5
+	done
+
+	# Route all outbound traffic through the AirVPN tunnel
+	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
+	export HTTP_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
+	export HTTPS_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
+	export http_proxy="$HTTP_PROXY"
+	export https_proxy="$HTTPS_PROXY"
+	# Do NOT proxy Railway internal traffic or localhost
+	export NO_PROXY="localhost,127.0.0.1,::1,.railway.internal,10.*,.svc,.cluster.local"
+	export no_proxy="$NO_PROXY"
+else
+	echo "WARNING: No tunnel key — running WITHOUT AirVPN" >&2
+fi
+
 # Direct bind, password required
 exec /app/code-server/bin/code-server \
 	--bind-addr "[::]:8443" \
