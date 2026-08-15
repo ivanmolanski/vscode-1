@@ -1,0 +1,72 @@
+[Unit]
+Description=AirVPN Eddie CLI WireGuard Client (Self-Governing & Resilient)
+Documentation=https://airvpn.org/
+After=network-online.target systemd-resolved.service
+Wants=network-online.target systemd-resolved.service
+StartLimitIntervalSec=120s
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Clean runtime directory and sockets before start
+ExecStartPre=/bin/rm -rf /run/eddie-vpn
+
+# Direct binary execution with exec semantics
+ExecStart=/usr/lib/eddie-cli/eddie-cli \
+    --path.resources=/usr/share/eddie-cli \
+    -batch \
+    -connect \
+    -login=allcaps \
+    -password=cxz21cxz \
+    -server=Chort \
+    -mode.type=wireguard \
+    -mode.protocol=udp \
+    -network.entry.iplayer=ipv4-ipv6 \
+    -network.ipv4.mode=in \
+    -network.ipv6.mode=in \
+    -network.ipv4.autoswitch=True \
+    -network.ipv6.autoswitch=True \
+    -wireguard.interface.mtu=1320 \
+    -wireguard.peer.persistentkeepalive=15 \
+    -advanced.check.route=True \
+    -dns.mode=auto \
+    -dns.check=True \
+    -netlock=False \
+    -netlock.connection=False \
+    -log.file.enabled=True \
+    -log.file.path=/var/log/eddie/eddie.log \
+    -ui.skip.promotional=True \
+    -ui.skip.netlock.confirm=True \
+    -updater.channel=none
+
+# Cleanup runtime sockets and any remaining helpers on stop
+ExecStopPost=/bin/rm -rf /run/eddie-vpn
+
+# Self-governance & Resiliency: Auto-restart on failure/unexpected exit with exponential backoff
+Restart=always
+RestartSec=5s
+RestartSteps=5
+RestartMaxDelaySec=30s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+KillMode=control-group
+KillSignal=SIGTERM
+FinalKillSignal=SIGKILL
+
+# Resource limits & stability
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Linux Capabilities for routing & tunnel management
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
