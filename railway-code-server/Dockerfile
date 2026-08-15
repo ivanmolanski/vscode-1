@@ -245,6 +245,7 @@ RUN set -eux; \
 	ssh -V; \
 	autossh -V; \
 	ssh-keygen -l -f /root/.ssh/known_hosts >/dev/null; \
+	/usr/sbin/privoxy --version; \
 	echo "All toolchains OK"
 
 EXPOSE 8443

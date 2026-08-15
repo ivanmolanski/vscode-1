@@ -121,7 +121,23 @@ toggle 0
 PROXYEOF
 	/usr/sbin/privoxy --no-daemon /tmp/privoxy.conf &
 	PRIVOXY_PID=$!
-	sleep 1
+	# Poll for privoxy readiness instead of blind sleep
+	for i in $(seq 1 10); do
+		if kill -0 $PRIVOXY_PID 2>/dev/null && curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 https://api.ipify.org >/dev/null 2>&1; then
+			break
+		fi
+		sleep 0.5
+	done
+	if ! kill -0 $PRIVOXY_PID 2>/dev/null; then
+		echo "CRITICAL: Privoxy failed to start — exiting" >&2
+		exit 1
+	fi
+	if ! curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
+		echo "CRITICAL: Privoxy not reachable on :8118 — exiting" >&2
+		kill $PRIVOXY_PID 2>/dev/null
+		exit 1
+	fi
+	echo "Privoxy 4.2.0 ready on :8118" >&2
 
 	# Set SOCKS5 proxy for curl/git (direct support)
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
