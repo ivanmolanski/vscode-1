@@ -221,7 +221,7 @@ RUN apt-get update && \
 # Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var
 # (written to /tmp/tunnel_key by the entrypoint — never baked into the image)
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
-RUN ssh-keyscan -H 140.238.139.20 >> /root/.ssh/known_hosts 2>/dev/null
+RUN ssh-keyscan -H 140.238.139.20 >> /root/.ssh/known_hosts 2>/dev/null || true
 
 EXPOSE 8443
 
