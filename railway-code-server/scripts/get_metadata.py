@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """Get instance metadata from OCI IMDS."""
 import json
+import sys
 import urllib.request
 
-headers = {"Authorization": "Bearer Oracle"}
-req = urllib.request.Request("http://169.254.169.254/opc/v2/instance/", headers=headers)
-resp = urllib.request.urlopen(req)
-data = json.loads(resp.read())
+HEADERS = {"Authorization": "Bearer Oracle"}
+IMDS_BASE = "http://169.254.169.254/opc/v2"
+
+# Fetch instance metadata
+try:
+    req = urllib.request.Request(f"{IMDS_BASE}/instance/", headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        data = json.loads(resp.read())
+except Exception as e:
+    print(f"ERROR: Instance metadata unreachable: {e}")
+    sys.exit(1)
 
 print(f"compartmentId: {data.get('compartmentId', 'N/A')}")
 print(f"region: {data.get('region', 'N/A')}")
@@ -16,12 +24,9 @@ print(f"displayName: {data.get('displayName', 'N/A')}")
 
 # Also try VNIC attachments
 try:
-    vnic_req = urllib.request.Request(
-        "http://169.254.169.254/opc/v2/vnics/",
-        headers=headers
-    )
-    vnic_resp = urllib.request.urlopen(vnic_req)
-    vnics = json.loads(vnic_resp.read())
+    req = urllib.request.Request(f"{IMDS_BASE}/vnics/", headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        vnics = json.loads(resp.read())
     print(f"\nVNICs found: {len(vnics)}")
     for v in vnics:
         print(f"  VNIC: {v.get('vnicId', 'N/A')}")

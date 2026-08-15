@@ -195,17 +195,6 @@ RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config && \
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 
-# Fail-fast: verify every toolchain from the image is runnable. This catches a
-# broken install at build time instead of when a user tries to run it. The Rust
-# checks run as 'abc' (the runtime user) to prove the toolchain is usable by
-# the user who will actually run it, not just by root.
-RUN set -eux; \
-	node --version; npm --version; yarn --version; pnpm --version; bun --version; \
-	python3 --version; pip3 --version; uv --version; poetry --version; \
-	go version; git --version; git-lfs --version; jq --version; \
-	su abc -s /bin/bash -c 'rustc --version && cargo --version'; \
-	echo "All toolchains OK"
-
 # ---------------------------------------------------------------------------
 # AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 22 only)
 # The VCN security list only allows inbound port 22, so we open an
@@ -221,7 +210,24 @@ RUN apt-get update && \
 # Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var
 # (written to /tmp/tunnel_key by the entrypoint — never baked into the image)
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
-RUN ssh-keyscan -H 140.238.139.20 >> /root/.ssh/known_hosts 2>/dev/null || true
+# Out-of-band verified host key — never use ssh-keyscan at runtime
+RUN printf '140.238.139.20 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1FePPG7b/9e89XTFwtm9RxRiufeGCBKybqEzeo0+cC\n140.238.139.20 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQD0a/NfRiZgfQy6GLA6knSezltiZ8sFPMqRGtwNaGqJwgCKwlnaHzQsWLD1iLJftaQNTpg+44otgPWFqIfpx6pQMen67pJte+XDIFcru/5cD8RWUdh9VEhIgfTu/KWR8yjaHg+bnOSzn/vrbfFrG0avyMyyWiEWb6FkIgEfFluxiuZx3KoRWQXWnttsBPXPrbYTZ0ZgAfqHZ/L6pzya63o0jZHSQJ4OlI9SirCMDeH5qsGiLX0LarIy5AUpoG22oaINhZlMobvqg+JzXlWfr69BG/gV8nCQcRYojgKdLOY7vlo1C21aW79TM7xydYIHnidr2uWjwv2MYcc9hR6TX2G7z5ICS5D3JmdNh6TKnd/4kWHYEPDBR5OI38GN0/c3BMDas48oXVrEgSkoAplgd07yuD1xYi3s4BIvQN+ZMFlrJo8EdB800s8DOx/rjcoP0xlY12Luwem0ZTDCFLUuRmjrYbAYodSDm1g9ilgmE/CfD2SuHHhllCJfNEYe7akIDkU=\n' >> /root/.ssh/known_hosts
+
+# ---------------------------------------------------------------------------
+# Fail-fast: verify every toolchain and tunnel tool is runnable. Catches a
+# broken install at build time. The Rust checks run as 'abc' (the runtime
+# user) to prove the toolchain is usable by the actual user, not just root.
+# ssh-keygen validates the pinned host keys are parseable.
+# ---------------------------------------------------------------------------
+RUN set -eux; \
+	node --version; npm --version; yarn --version; pnpm --version; bun --version; \
+	python3 --version; pip3 --version; uv --version; poetry --version; \
+	go version; git --version; git-lfs --version; jq --version; \
+	su abc -s /bin/bash -c 'rustc --version && cargo --version'; \
+	ssh -V; \
+	autossh -V || true; \
+	ssh-keygen -l -f /root/.ssh/known_hosts >/dev/null; \
+	echo "All toolchains OK"
 
 EXPOSE 8443
 

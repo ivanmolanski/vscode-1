@@ -62,6 +62,8 @@ TUNNEL_PORT=1080
 
 # Write SSH key from env var to file (never baked into image)
 if [ -z "${VPS_SSH_KEY:-}" ]; then
+	# Clean up any stale key from a previous container start
+	rm -f "$TUNNEL_KEY" 2>/dev/null || true
 	echo "WARNING: VPS_SSH_KEY not set — AirVPN tunnel will NOT start" >&2
 else
 	echo "$VPS_SSH_KEY" > "$TUNNEL_KEY"
@@ -71,8 +73,9 @@ fi
 # Kill any stale tunnel from a previous container restart
 pkill -f 'ssh -D.*$TUNNEL_HOST' 2>/dev/null || true
 
-# Start the tunnel if key is available
-if [ -f "$TUNNEL_KEY" ]; then
+# Start the tunnel if VPS_SSH_KEY was provided and key file exists
+tunnel_ok=false
+if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 	# autossh for auto-reconnect
 	# -M 0 : let ssh detect dead connections via ServerAliveInterval
 	# -f    : fork to background after auth
@@ -82,7 +85,8 @@ if [ -f "$TUNNEL_KEY" ]; then
 	export AUTOSSH_LOGFILE=/tmp/airvpn-tunnel.log
 	export AUTOSSH_PORT=0
 	nohup autossh -M 0 -f -N \
-		-o StrictHostKeyChecking=no \
+		-o StrictHostKeyChecking=yes \
+		-o UserKnownHostsFile=/root/.ssh/known_hosts \
 		-o ServerAliveInterval=30 \
 		-o ServerAliveCountMax=3 \
 		-o ExitOnForwardFailure=yes \
@@ -95,11 +99,14 @@ if [ -f "$TUNNEL_KEY" ]; then
 	for i in $(seq 1 20); do
 		if curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
 			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}" >&2
+			tunnel_ok=true
 			break
 		fi
 		sleep 0.5
 	done
+fi
 
+if [ "$tunnel_ok" = true ]; then
 	# Route all outbound traffic through the AirVPN tunnel
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
 	export HTTP_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
@@ -107,9 +114,13 @@ if [ -f "$TUNNEL_KEY" ]; then
 	export http_proxy="$HTTP_PROXY"
 	export https_proxy="$HTTPS_PROXY"
 	# Do NOT proxy Railway internal traffic or localhost
-	export NO_PROXY="localhost,127.0.0.1,::1,.railway.internal,10.*,.svc,.cluster.local"
+	export NO_PROXY="localhost,127.0.0.1,::1,.railway.internal,10.0.0.0/8,.svc,.cluster.local,.internal"
 	export no_proxy="$NO_PROXY"
 else
+	if [ -n "${VPS_SSH_KEY:-}" ]; then
+		echo "CRITICAL: AirVPN tunnel failed to establish — exiting" >&2
+		exit 1
+	fi
 	echo "WARNING: No tunnel key — running WITHOUT AirVPN" >&2
 fi
 

@@ -1,0 +1,41 @@
+[Unit]
+Description=Dante SOCKS5 Proxy Server (SOCKS v4/v5)
+Documentation=man:danted(8) man:danted.conf(5)
+After=network-online.target eddie.service
+Wants=network-online.target
+Requires=eddie.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+PIDFile=/run/danted/pid
+ExecStart=/usr/sbin/danted -p /run/danted/pid
+ExecStartPre=/bin/sh -c 'uid=$(sed -n -e "s/[[:space:]]//g" -e "s/#.*//" -e "/^user\\.privileged/{s/[^:]*://p;q;}" /etc/danted.conf); if [ -n "$uid" ]; then touch /run/danted/pid; chown $uid /run/danted/pid; fi'
+ExecStopPost=/bin/rm -f /run/danted/pid
+
+Restart=always
+RestartSec=3s
+
+TimeoutStartSec=10s
+TimeoutStopSec=5s
+KillMode=mixed
+KillSignal=SIGTERM
+
+RuntimeDirectory=danted
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_LOCAL AF_NETLINK
+LockPersonality=yes
+NoNewPrivileges=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+DeviceAllow=/dev/null rw
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=danted
+
+[Install]
+WantedBy=multi-user.target
