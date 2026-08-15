@@ -225,7 +225,7 @@ RUN set -eux; \
 	go version; git --version; git-lfs --version; jq --version; \
 	su abc -s /bin/bash -c 'rustc --version && cargo --version'; \
 	ssh -V; \
-	autossh -V || true; \
+	autossh -V; \
 	ssh-keygen -l -f /root/.ssh/known_hosts >/dev/null; \
 	echo "All toolchains OK"
 

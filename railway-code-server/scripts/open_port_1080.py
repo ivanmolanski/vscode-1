@@ -2,11 +2,13 @@
 """Open port 1080 in Oracle VCN security list using OCI Python SDK + instance principals."""
 import oci
 import json
+import os
 import sys
 import urllib.request
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
 
 IMDS_BASE = "http://169.254.169.254/opc/v2"
+SOURCE_CIDR = os.environ.get("ALLOWED_SOURCE_CIDR", "0.0.0.0/0")
 
 
 def imds_get(path):
@@ -79,12 +81,12 @@ applied = False
 
 for sl_id in target_sl_ids:
     try:
-        sl = net_client.get_security_list(sl_id)
+        sl_response = net_client.get_security_list(sl_id)
+        sl_data = sl_response.data
+        etag = sl_response.headers.get("etag")
     except oci.exceptions.ServiceError as e:
         print(f"  Skipping {sl_id}: {e.status} {e.message}")
         continue
-
-    sl_data = sl.data
     print(f"Security List: {sl_data.display_name} ({sl_data.id})")
 
     has_1080 = False
@@ -109,7 +111,7 @@ for sl_id in target_sl_ids:
         print(f"  Adding port 1080 ingress rule to {sl_data.display_name}...")
         existing_rules.append(
             oci.core.models.IngressSecurityRule(
-                source="0.0.0.0/0",
+                source=SOURCE_CIDR,
                 protocol="6",
                 is_stateless=False,
                 tcp_options=oci.core.models.TcpOptions(
@@ -125,11 +127,13 @@ for sl_id in target_sl_ids:
             egress_security_rules=sl_data.egress_security_rules,
         )
         try:
-            result = net_client.update_security_list(sl_id, update_details)
+            result = net_client.update_security_list(sl_id, update_details, if_match=etag)
             print(f"  Result: {result.status}")
             applied = True
         except oci.exceptions.ServiceError as e:
             print(f"  FAILED to update {sl_data.display_name}: {e.status} {e.message}")
+    else:
+        applied = True
 
 if not applied:
     print("No port-1080 rule was applied to any security list")

@@ -10,10 +10,13 @@ unset NO_PROXY no_proxy HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 echo "=== Deploying hardened service units ==="
 
 # --- 1. Dante systemd service (install canonical unit) ---
-if [ -f /tmp/danted.service ]; then
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/danted.service" ]; then
+    cp "$SCRIPT_DIR/danted.service" /etc/systemd/system/danted.service
+elif [ -f /tmp/danted.service ]; then
     cp /tmp/danted.service /etc/systemd/system/danted.service
 else
-    echo "WARN: /tmp/danted.service not found, skipping"
+    echo "WARN: danted.service not found in script dir or /tmp, skipping"
 fi
 
 # --- 2. VPN Health Watchdog service ---
@@ -61,8 +64,8 @@ systemctl enable danted.service
 systemctl enable vpn-health.timer
 systemctl enable eddie.service
 
-# --- 6. Start Dante (Eddie should already be running) ---
-systemctl start danted.service
+# --- 6. Restart Dante (Eddie should already be running) ---
+systemctl restart danted.service
 systemctl start vpn-health.timer
 
 echo "=== Done ==="

@@ -38,7 +38,8 @@ net_client = oci.core.VirtualNetworkClient(config={"region": region}, signer=sig
 
 try:
     vnics = imds_get("/vnics/")
-except Exception:
+except Exception as e:
+    print(f"VNIC metadata failed: {e}")
     vnics = []
 
 # Collect every non-empty subnetId from all VNICs

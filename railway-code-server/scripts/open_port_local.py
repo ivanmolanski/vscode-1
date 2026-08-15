@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Open port 1080 in Oracle VCN security list using local OCI API key."""
 import oci
+import os
 import sys
+
+SOURCE_CIDR = os.environ.get("ALLOWED_SOURCE_CIDR", "0.0.0.0/0")
 
 # Load config from default OCI config location (~/.oci/config)
 config = oci.config.from_file(profile_name="DEFAULT")
@@ -12,26 +15,19 @@ net_client = oci.core.VirtualNetworkClient(config)
 compute_client = oci.core.ComputeClient(config)
 
 # Resolve target security lists via VNIC attachment → subnet
+target_sl_ids = set()
 try:
-    instance_client = oci.core.ComputeClient(config)
-    # Get the instance's own VNICs to find the subnet
-    # Use the compartment to list VCNs and find security lists
-    vcns = oci.pagination.list_call_get_all_results(
-        net_client.list_vcns, compartment_id=config["tenancy"]
+    attachments = oci.pagination.list_call_get_all_results(
+        compute_client.list_vnic_attachments,
+        compartment_id=config["tenancy"],
     )
-    target_sl_ids = set()
-    for vcn in vcns.data:
-        try:
-            sls = oci.pagination.list_call_get_all_results(
-                net_client.list_security_lists,
-                compartment_id=config["tenancy"],
-                vcn_id=vcn.id,
-            )
-            target_sl_ids.update(sl.id for sl in sls.data)
-        except Exception:
-            continue
+    for att in attachments.data:
+        if att.subnet_id:
+            subnet = net_client.get_subnet(att.subnet_id).data
+            target_sl_ids.update(subnet.security_list_ids or [])
+            print(f"  Subnet: {subnet.display_name} → SLs: {subnet.security_list_ids}")
 except Exception as e:
-    print(f"Resolution failed: {e}")
+    print(f"VNIC/subnet resolution failed: {e}")
     sys.exit(1)
 
 if not target_sl_ids:
@@ -40,12 +36,12 @@ if not target_sl_ids:
 
 for sl_id in target_sl_ids:
     try:
-        sl = net_client.get_security_list(sl_id)
+        sl_response = net_client.get_security_list(sl_id)
+        sl_data = sl_response.data
+        etag = sl_response.headers.get("etag")
     except oci.exceptions.ServiceError as e:
         print(f"  Skipping {sl_id}: {e.status} {e.message}")
         continue
-
-    sl_data = sl.data
     print(f"  Security List: {sl_data.display_name} ({sl_data.id})")
 
     has_1080 = False
@@ -66,7 +62,7 @@ for sl_id in target_sl_ids:
         print(f"    Adding TCP 1080 ingress rule...")
         existing_rules.append(
             oci.core.models.IngressSecurityRule(
-                source="0.0.0.0/0",
+                source=SOURCE_CIDR,
                 protocol="6",
                 is_stateless=False,
                 tcp_options=oci.core.models.TcpOptions(
@@ -81,7 +77,7 @@ for sl_id in target_sl_ids:
             egress_security_rules=sl_data.egress_security_rules,
         )
         try:
-            result = net_client.update_security_list(sl_data.id, update)
+            result = net_client.update_security_list(sl_data.id, update, if_match=etag)
             print(f"    SUCCESS: {result.status}")
         except oci.exceptions.ServiceError as e:
             print(f"    FAILED: {e.status} - {e.message}")

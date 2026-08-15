@@ -42,13 +42,19 @@ if ss -tlnp | grep -q ':1080 '; then
         log "VPN EGRESS WRONG ($VPN_IP != $EXPECTED_IP) — restarting danted"
         systemctl restart danted.service
         sleep 5
-        # Only restart eddie if VPN IP is definitively wrong (not a Dante/proxy issue)
-        if [ "$VPN_IP" != "TIMEOUT" ]; then
-            log "Restarting eddie for wrong egress IP"
+        # Fresh egress check after Dante restart
+        VPN_POST=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
+        if [ "$VPN_POST" = "TIMEOUT" ]; then
+            sleep 3
+            VPN_POST=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
+        fi
+        # Only restart eddie if post-Dante check shows wrong IP (not a Dante/proxy issue)
+        if [ "$VPN_POST" != "$EXPECTED_IP" ] && [ "$VPN_POST" != "TIMEOUT" ]; then
+            log "Restarting eddie for wrong egress IP (post-Dante: $VPN_POST)"
             systemctl restart eddie.service
             sleep 8
         fi
-        # Re-verify
+        # Final re-verify
         VPN_IP2=$(curl -sS --max-time 8 --proxy socks5h://127.0.0.1:1080 https://api.ipify.org 2>/dev/null || echo "TIMEOUT")
         if [ "$VPN_IP2" != "$EXPECTED_IP" ]; then
             log "CRITICAL: VPN still broken after restart ($VPN_IP2)"

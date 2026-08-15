@@ -27,6 +27,7 @@ private_bytes = private_key.private_bytes(
 )
 fd = os.open(str(private_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 try:
+    os.fchmod(fd, 0o600)
     os.write(fd, private_bytes)
 finally:
     os.close(fd)
@@ -45,7 +46,7 @@ der_bytes = public_key.public_bytes(
     encoding=serialization.Encoding.DER,
     format=serialization.PublicFormat.SubjectPublicKeyInfo,
 )
-fingerprint = ":".join(f"{b:02x}" for b in hashlib.md5(der_bytes).digest())
+fingerprint = ":".join(f"{b:02x}" for b in hashlib.md5(der_bytes, usedforsecurity=False).digest())
 print(f"Private key: {private_path}")
 print(f"Public key:  {public_path}")
 print(f"Fingerprint: {fingerprint}")
