@@ -71,3 +71,6 @@ console-history-*.log
 # OCI key material
 oci_public_key.pem
 oci_api_key.pem
+
+# Binary packages
+*.deb
