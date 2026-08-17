@@ -74,3 +74,11 @@ oci_api_key.pem
 
 # Binary packages
 *.deb
+
+# VPS backup folder (contains SSH keys, iptables rules, system configs)
+/railway-code-server/vps-backup/
+
+# Throwaway Code OSS dev profiles created by the launch skill
+.v[0-9]*/
+# Local agent validation evidence
+.agent-validation/
