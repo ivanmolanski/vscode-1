@@ -121,13 +121,20 @@ cleanup_stale_tunnel() {
 		sleep 0.5
 	done
 
-	# Final check - if port still occupied, force kill remaining processes
+	# Final check - if port still occupied, force kill only processes whose
+	# command line matches our SSH dynamic-forwarding tunnel (host + port).
+	# Leave unrelated processes holding the port running; the abort check
+	# below then fails startup rather than racing them.
 	if ss -tlnp | grep -q ":${TUNNEL_PORT} "; then
 		echo "WARNING: Port ${TUNNEL_PORT} still occupied, forcing cleanup" >&2
 		local pids
 		pids=$(ss -tlnp | grep ":${TUNNEL_PORT} " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
 		for pid in $pids; do
-			kill -9 "$pid" 2>/dev/null || true
+			local cmdline
+			cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' || true)
+			if [[ "$cmdline" == *"$TUNNEL_HOST"* ]] && [[ "$cmdline" == *"-D"* ]] && [[ "$cmdline" == *"${TUNNEL_PORT}"* ]]; then
+				kill -9 "$pid" 2>/dev/null || true
+			fi
 		done
 		sleep 1
 	fi
@@ -214,13 +221,10 @@ PROXYEOF
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
 	# Set HTTP proxy for Node.js/Copilot (privoxy bridges to SOCKS5)
 	export HTTP_PROXY="http://127.0.0.1:8118"
-	# Clear NO_PROXY/no_proxy for all child processes to ensure proxy is used
-	export NO_PROXY=
-	export no_proxy=
 	export HTTPS_PROXY="http://127.0.0.1:8118"
 	export http_proxy="$HTTP_PROXY"
 	export https_proxy="$HTTPS_PROXY"
-	# Do NOT proxy Railway internal traffic or localhost
+	# Do NOT proxy Railway internal traffic or localhost (documented exceptions)
 	export NO_PROXY="localhost,127.0.0.1,::1,.railway.internal,10.0.0.0/8,.svc,.cluster.local,.internal"
 	export no_proxy="$NO_PROXY"
 else
