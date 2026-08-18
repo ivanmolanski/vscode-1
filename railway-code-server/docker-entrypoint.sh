@@ -53,17 +53,18 @@ chown -R abc:abc /config 2>/dev/null || true
 export PATH="/usr/local/bin:$PATH"
 
 # ---------------------------------------------------------------------------
-# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 22)
-# Proven working at 19:21 UTC (Railway egress 152.55.180.107 authed).
-# Keep this section byte-identical to the working deployment: no TCP probe,
-# no pre-flight ssh attempts, no AddressFamily override, no diagnostics.
-# NOTE: adding a raw TCP probe to :22 first makes sshd log 'banner exchange:
+# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443).
+# Railway blocks outbound TCP 22, so we connect to sshd on port 443 (sshd
+# listens on 22+443 via ssh.socket.d override on the VPS). Proven working:
+# egress 152.55.180.107 authed through the tunnel.
+# NOTE: adding a raw TCP probe to :443 first makes sshd log 'banner exchange:
 # invalid format' and stales the following SSH handshake — do not add one.
 # ---------------------------------------------------------------------------
 TUNNEL_HOST="140.238.139.20"
 TUNNEL_USER="ubuntu"
 TUNNEL_KEY="/tmp/tunnel_key"
 TUNNEL_PORT=1080
+TUNNEL_SSH_PORT=443
 
 # Write SSH key from env var to file (never baked into image)
 if [ -z "${VPS_SSH_KEY:-}" ]; then
@@ -76,9 +77,73 @@ else
 fi
 
 # Kill any stale tunnel from a previous container restart
-# Double quotes let the shell expand TUNNEL_HOST before pkill sees the
-# pattern, so it matches the ssh dynamic-forward command line actually running.
-pkill -f "ssh -D.*${TUNNEL_HOST}" 2>/dev/null || true
+# Use a root-owned pidfile under /run (not writable /tmp) and validate
+# the PID's /proc command line before signaling.
+cleanup_stale_tunnel() {
+	local pidfile="/run/airvpn-tunnel.pid"
+	local host_pattern="${TUNNEL_HOST//./\\.}"  # escape dots for regex
+
+	# First, try to clean up using the pidfile if it exists and is valid
+	if [ -f "$pidfile" ]; then
+		local pid
+		pid=$(cat "$pidfile" 2>/dev/null || true)
+		if [[ "$pid" =~ ^[0-9]+$ ]] && [ -d "/proc/$pid" ]; then
+			# Verify the process command line matches our tunnel
+			local cmdline
+			cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' || true)
+			if [[ "$cmdline" == *"$TUNNEL_HOST"* ]] && { [[ "$cmdline" == *"autossh"* ]] || [[ "$cmdline" == *"ssh"*"-D"* ]]; }; then
+				echo "Stopping stale tunnel (PID $pid) from pidfile" >&2
+				kill "$pid" 2>/dev/null || true
+				# Wait for process to exit
+				for i in $(seq 1 10); do
+					if ! kill -0 "$pid" 2>/dev/null; then
+						break
+					fi
+					sleep 0.5
+				done
+				# Force kill if still alive
+				if kill -0 "$pid" 2>/dev/null; then
+					kill -9 "$pid" 2>/dev/null || true
+				fi
+			fi
+		fi
+	fi
+
+	# Fallback: pkill by escaped TUNNEL_HOST match (preserves existing behavior)
+	pkill -f "ssh -D.*${host_pattern}" 2>/dev/null || true
+	pkill -f "autossh.*${host_pattern}" 2>/dev/null || true
+
+	# Wait for port 1080 to be released (bounded timeout with escalation)
+	for i in $(seq 1 20); do
+		if ! ss -tlnp | grep -q ":${TUNNEL_PORT} "; then
+			break
+		fi
+		sleep 0.5
+	done
+
+	# Final check - if port still occupied, force kill remaining processes
+	if ss -tlnp | grep -q ":${TUNNEL_PORT} "; then
+		echo "WARNING: Port ${TUNNEL_PORT} still occupied, forcing cleanup" >&2
+		local pids
+		pids=$(ss -tlnp | grep ":${TUNNEL_PORT} " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
+		for pid in $pids; do
+			kill -9 "$pid" 2>/dev/null || true
+		done
+		sleep 1
+	fi
+
+	# After escalation, verify the port was actually released. If the previous
+	# tunnel still owns it, abort startup rather than racing the new autossh.
+	if ss -tlnp | grep -q ":${TUNNEL_PORT} "; then
+		echo "CRITICAL: Port ${TUNNEL_PORT} still owned after forced cleanup — aborting startup" >&2
+		exit 1
+	fi
+
+	# Clean up pidfile
+	rm -f "$pidfile" 2>/dev/null || true
+}
+
+cleanup_stale_tunnel
 
 # Start the tunnel if VPS_SSH_KEY was provided and key file exists
 tunnel_ok=false
@@ -88,7 +153,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 	# -f    : fork to background after auth
 	# -N    : no remote command
 	# -D    : dynamic SOCKS5 forwarding
-	export AUTOSSH_PIDFILE=/tmp/airvpn-tunnel.pid
+	export AUTOSSH_PIDFILE=/run/airvpn-tunnel.pid
 	export AUTOSSH_LOGFILE=/tmp/airvpn-tunnel.log
 	export AUTOSSH_PORT=0
 	nohup autossh -M 0 -f -N \
@@ -98,6 +163,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 		-o ServerAliveCountMax=3 \
 		-o ExitOnForwardFailure=yes \
 		-o ConnectTimeout=10 \
+		-p "${TUNNEL_SSH_PORT}" \
 		-i "$TUNNEL_KEY" \
 		-D "${TUNNEL_PORT}" \
 		"${TUNNEL_USER}@${TUNNEL_HOST}" \
@@ -105,7 +171,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 
 	# Wait for the tunnel to come up (max 12s)
 	for i in $(seq 1 24); do
-		if curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
+		if NO_PROXY= no_proxy= curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
 			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}" >&2
 			tunnel_ok=true
 			break
@@ -128,7 +194,7 @@ PROXYEOF
 	PRIVOXY_PID=$!
 	# Poll for privoxy readiness instead of blind sleep
 	for i in $(seq 1 10); do
-		if kill -0 $PRIVOXY_PID 2>/dev/null && curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
+		if kill -0 $PRIVOXY_PID 2>/dev/null && NO_PROXY= no_proxy= curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
 			break
 		fi
 		sleep 0.5
@@ -137,7 +203,7 @@ PROXYEOF
 		echo "CRITICAL: Privoxy failed to start — exiting" >&2
 		exit 1
 	fi
-	if ! curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
+	if ! NO_PROXY= no_proxy= curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
 		echo "CRITICAL: Privoxy not reachable on :8118 — exiting" >&2
 		kill $PRIVOXY_PID 2>/dev/null
 		exit 1
@@ -148,6 +214,9 @@ PROXYEOF
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
 	# Set HTTP proxy for Node.js/Copilot (privoxy bridges to SOCKS5)
 	export HTTP_PROXY="http://127.0.0.1:8118"
+	# Clear NO_PROXY/no_proxy for all child processes to ensure proxy is used
+	export NO_PROXY=
+	export no_proxy=
 	export HTTPS_PROXY="http://127.0.0.1:8118"
 	export http_proxy="$HTTP_PROXY"
 	export https_proxy="$HTTPS_PROXY"
