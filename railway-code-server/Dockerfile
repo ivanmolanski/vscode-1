@@ -39,6 +39,7 @@ RUN apt-get update && \
 	libffi-dev \
 	python3-dev \
 	docker.io \
+	iproute2 \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
