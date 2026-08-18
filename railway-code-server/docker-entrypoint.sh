@@ -121,18 +121,34 @@ cleanup_stale_tunnel() {
 		sleep 0.5
 	done
 
-	# Final check - if port still occupied, force kill only processes whose
-	# command line matches our SSH dynamic-forwarding tunnel (host + port).
-	# Leave unrelated processes holding the port running; the abort check
-	# below then fails startup rather than racing them.
+	# Final check - if port still occupied, force kill only the process with an
+	# exact dynamic-forwarding argument for our host and port. Parse
+	# /proc/$pid/cmdline as NUL-delimited arguments so substring matches from
+	# other arguments cannot trigger a kill; unrelated listeners stay up (the
+	# abort check below then fails startup rather than racing them).
 	if ss -tlnp | grep -q ":${TUNNEL_PORT} "; then
 		echo "WARNING: Port ${TUNNEL_PORT} still occupied, forcing cleanup" >&2
 		local pids
 		pids=$(ss -tlnp | grep ":${TUNNEL_PORT} " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
 		for pid in $pids; do
-			local cmdline
-			cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' || true)
-			if [[ "$cmdline" == *"$TUNNEL_HOST"* ]] && [[ "$cmdline" == *"-D"* ]] && [[ "$cmdline" == *"${TUNNEL_PORT}"* ]]; then
+			# cmdline is NUL-delimited; mapfile -d '' splits on NUL.
+			local -a args
+			mapfile -d '' -t args < "/proc/$pid/cmdline" 2>/dev/null || continue
+			local has_forward=false i arg next target
+			for (( i = 0; i < ${#args[@]}; i++ )); do
+				arg="${args[$i]}"
+				next="${args[$((i + 1))]:-}"
+				if { [ "$arg" = "-D" ] && [ "$next" = "${TUNNEL_PORT}" ]; } || [ "$arg" = "-D${TUNNEL_PORT}" ]; then
+					for target in "${args[@]}"; do
+						if [[ "$target" == *"@${TUNNEL_HOST}" ]]; then
+							has_forward=true
+							break
+						fi
+					done
+					break
+				fi
+			done
+			if [ "$has_forward" = true ]; then
 				kill -9 "$pid" 2>/dev/null || true
 			fi
 		done
@@ -224,8 +240,11 @@ PROXYEOF
 	export HTTPS_PROXY="http://127.0.0.1:8118"
 	export http_proxy="$HTTP_PROXY"
 	export https_proxy="$HTTPS_PROXY"
-	# Do NOT proxy Railway internal traffic or localhost (documented exceptions)
-	export NO_PROXY="localhost,127.0.0.1,::1,.railway.internal,10.0.0.0/8,.svc,.cluster.local,.internal"
+	# Preserve any inherited NO_PROXY/no_proxy exclusions (either casing) while
+	# appending the documented Railway-internal/localhost defaults.
+	NO_PROXY="${NO_PROXY:-$no_proxy}"
+	NO_PROXY="${NO_PROXY:+$NO_PROXY,}localhost,127.0.0.1,::1,.railway.internal,10.0.0.0/8,.svc,.cluster.local,.internal"
+	export NO_PROXY
 	export no_proxy="$NO_PROXY"
 else
 	if [ -n "${VPS_SSH_KEY:-}" ]; then
