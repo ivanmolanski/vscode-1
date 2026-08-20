@@ -197,8 +197,9 @@ COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 
 # ---------------------------------------------------------------------------
-# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 22 only)
-# The VCN security list only allows inbound port 22, so we open an
+# AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443).
+# The VCN security list + instance iptables now allow inbound TCP 443 (v4+v6),
+# and sshd listens on 22+443 via ssh.socket.d override, so we open an
 # ssh -D tunnel from inside the container to the VPS where Dante routes
 # traffic through AirVPN. ALL_PROXY points to localhost:1080 (the tunnel).
 # Privoxy 4.2.0 provides an HTTP proxy on :8118 that forwards to the SOCKS5

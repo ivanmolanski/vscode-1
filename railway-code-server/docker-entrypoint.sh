@@ -33,7 +33,7 @@ if [ -z "$CS_PASSWORD" ]; then
 	CS_PASSWORD="$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
 	echo "$CS_PASSWORD" > /config/.code-server-password
 	chmod 600 /config/.code-server-password
-	echo "Generated code-server login password: $CS_PASSWORD" >&2
+	echo "Generated code-server login password: $CS_PASSWORD"
 fi
 
 # Write the config with auth=password. Update checks stay ENABLED (no
@@ -70,7 +70,7 @@ TUNNEL_SSH_PORT=443
 if [ -z "${VPS_SSH_KEY:-}" ]; then
 	# Clean up any stale key from a previous container start
 	rm -f "$TUNNEL_KEY" 2>/dev/null || true
-	echo "WARNING: VPS_SSH_KEY not set — AirVPN tunnel will NOT start" >&2
+	echo "WARNING: VPS_SSH_KEY not set — AirVPN tunnel will NOT start"
 else
 	echo "$VPS_SSH_KEY" > "$TUNNEL_KEY"
 	chmod 600 "$TUNNEL_KEY"
@@ -92,7 +92,7 @@ cleanup_stale_tunnel() {
 			local cmdline
 			cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' || true)
 			if [[ "$cmdline" == *"$TUNNEL_HOST"* ]] && { [[ "$cmdline" == *"autossh"* ]] || [[ "$cmdline" == *"ssh"*"-D"* ]]; }; then
-				echo "Stopping stale tunnel (PID $pid) from pidfile" >&2
+				echo "Stopping stale tunnel (PID $pid) from pidfile"
 				kill "$pid" 2>/dev/null || true
 				# Wait for process to exit
 				for i in $(seq 1 10); do
@@ -127,7 +127,7 @@ cleanup_stale_tunnel() {
 	# other arguments cannot trigger a kill; unrelated listeners stay up (the
 	# abort check below then fails startup rather than racing them).
 	if ss -tlnp | grep -q ":${TUNNEL_PORT} "; then
-		echo "WARNING: Port ${TUNNEL_PORT} still occupied, forcing cleanup" >&2
+		echo "WARNING: Port ${TUNNEL_PORT} still occupied, forcing cleanup"
 		local pids
 		pids=$(ss -tlnp | grep ":${TUNNEL_PORT} " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
 		for pid in $pids; do
@@ -195,7 +195,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 	# Wait for the tunnel to come up (max 12s)
 	for i in $(seq 1 24); do
 		if NO_PROXY= no_proxy= curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
-			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}" >&2
+			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}"
 			tunnel_ok=true
 			break
 		fi
@@ -231,7 +231,7 @@ PROXYEOF
 		kill $PRIVOXY_PID 2>/dev/null
 		exit 1
 	fi
-	echo "Privoxy 4.2.0 ready on :8118" >&2
+	echo "Privoxy 4.2.0 ready on :8118"
 
 	# Set SOCKS5 proxy for curl/git (direct support)
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
@@ -248,9 +248,9 @@ PROXYEOF
 	export no_proxy="$NO_PROXY"
 else
 	if [ -n "${VPS_SSH_KEY:-}" ]; then
-		echo "WARNING: AirVPN tunnel failed to establish — running WITHOUT proxy" >&2
+		echo "WARNING: AirVPN tunnel failed to establish — running WITHOUT proxy"
 	fi
-	echo "WARNING: No tunnel — running code-server unprotected" >&2
+	echo "WARNING: No tunnel — running code-server unprotected"
 fi
 
 # Direct bind, password required
