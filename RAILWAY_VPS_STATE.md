@@ -7,7 +7,9 @@
 ```
 Browser ──> code-server (Railway, [::]:8443 behind Railway TLS)
                 │
-                ├─ direct egress ──────────────> 152.55.180.107 (Railway IP)
+                ├─ direct egress ──────────────> Railway egress IP (observed:
+                │                                 152.55.180.107 on deployment
+                │                                 24beb6d3 — NOT stable, may change)
                 │
                 └─ privoxy :8118 (HTTP→SOCKS bridge)
                         │
@@ -15,6 +17,12 @@ Browser ──> code-server (Railway, [::]:8443 behind Railway TLS)
                                                                 │
                                                                 └─ egress ──> 213.152.162.5 (AirVPN)
 ```
+
+> The Railway egress IP is **not a routing or allowlist contract** — Railway's
+> static outbound IP is disabled (see table below), so the address can change on
+> any redeploy. The fwmark fix below is deliberately port-based and
+> source-IP-independent for exactly this reason. Never pin or allowlist the
+> Railway egress IP on the VPS.
 
 ## Railway
 
@@ -75,7 +83,7 @@ set in a chain processed before the routing decision (mangle PREROUTING/OUTPUT �
 
 - SOCKS 1080 → `213.152.162.5` (AirVPN) ✓
 - HTTP 8118 → `213.152.162.5` (AirVPN) ✓
-- Direct → `152.55.180.107` (Railway) ✓
+- Direct → Railway egress IP (observed `152.55.180.107` on this deployment; may change) ✓
 - privoxy active+enabled, dante active (1080 v4+v6), vpn-health clean
   (`EXPECTED_IP=213.152.162.5`) ✓
 
@@ -87,11 +95,15 @@ set in a chain processed before the routing decision (mangle PREROUTING/OUTPUT �
 
 ## Secrets / rotation (ACTION FOR USER)
 
-`rw-vars.json` (contained `PASSWORD`="1" and full `VPS_SSH_KEY` private key) was **deleted**
-from disk. It was never committed (untracked), so no git history scrub needed. **Rotate both:**
+`rw-vars.json` (contained the `PASSWORD` value and the full `VPS_SSH_KEY` private key)
+was **deleted** from disk. It was never committed (untracked), so no git history scrub
+needed. **Rotate both:**
 1. `PASSWORD` — set a strong value on the Railway service variable
-2. `VPS_SSH_KEY` — generate a new keypair, put the private key in the Railway var,
-   append the public key to `/home/ubuntu/.ssh/authorized_keys` on the VPS
+2. `VPS_SSH_KEY` — generate a new keypair, put the private key in the Railway var.
+   On the VPS, **remove the exposed key's public-key line from
+   `/home/ubuntu/.ssh/authorized_keys`** before (or immediately after) appending the
+   replacement, then verify the old private key can no longer authenticate
+   (`ssh -i <old-key> ubuntu@140.238.139.20` must fail).
 
 ## Operational notes / lessons
 

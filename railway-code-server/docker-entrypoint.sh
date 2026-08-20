@@ -5,8 +5,9 @@
 # control auth and telemetry completely:
 #   - --auth password    : login required before the editor loads
 #   - --disable-telemetry: no data leaves the box
-# The password is persisted to /config so it survives restarts, and is
-# printed to the log on first boot for easy retrieval.
+# The password is persisted to /config/.code-server-password (mode 600, on the
+# volume) so it survives restarts. It is NEVER printed to the log — retrieve it
+# from that file if needed.
 
 set -e
 
@@ -33,7 +34,7 @@ if [ -z "$CS_PASSWORD" ]; then
 	CS_PASSWORD="$(head -c 12 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
 	echo "$CS_PASSWORD" > /config/.code-server-password
 	chmod 600 /config/.code-server-password
-	echo "Generated code-server login password: $CS_PASSWORD"
+	echo "Generated new code-server login password (stored in /config/.code-server-password)"
 fi
 
 # Write the config with auth=password. Update checks stay ENABLED (no
