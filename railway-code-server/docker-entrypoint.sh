@@ -282,19 +282,24 @@ Host 132.145.108.162 docker-host
     Port 443
     User ubuntu
     IdentityFile /root/.ssh/id_ed25519
-    StrictHostKeyChecking no
+    StrictHostKeyChecking yes
 SSHEOF
-	chmod 600 /root/.ssh/config
+
+	# Pinned host key — fetched out-of-band from the instance itself
+	# (cat /etc/ssh/ssh_host_ed25519_key.pub), NOT via ssh-keyscan.
+	# If the host is rebuilt and its key changes, connections fail closed.
+	cat << 'KHEOF' >> /root/.ssh/known_hosts
+132.145.108.162 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJSsWiBzkqipz+KYKBuwvhEJFLf0TvnaN0kYa2j+srry
+KHEOF
+	chmod 600 /root/.ssh/config /root/.ssh/known_hosts
 	cp /root/.ssh/config /config/.ssh/config 2>/dev/null || true
 	cp /root/.ssh/config /home/abc/.ssh/config 2>/dev/null || true
+	cp /root/.ssh/known_hosts /config/.ssh/known_hosts 2>/dev/null || true
+	cp /root/.ssh/known_hosts /home/abc/.ssh/known_hosts 2>/dev/null || true
 
-	ssh-keyscan -p 443 132.145.108.162 >> /root/.ssh/known_hosts 2>/dev/null || true
-	ssh-keyscan -p 443 132.145.108.162 >> /config/.ssh/known_hosts 2>/dev/null || true
-	ssh-keyscan -p 443 132.145.108.162 >> /home/abc/.ssh/known_hosts 2>/dev/null || true
+	# Ensure default DOCKER_HOST is exported for terminal sessions
+	export DOCKER_HOST="${DOCKER_HOST:-ssh://ubuntu@132.145.108.162:443}"
 fi
-
-# Ensure default DOCKER_HOST is exported for terminal sessions
-export DOCKER_HOST="${DOCKER_HOST:-ssh://ubuntu@132.145.108.162:443}"
 
 # Direct bind, password required
 exec /app/code-server/bin/code-server \
