@@ -61,17 +61,23 @@ export PATH="/usr/local/bin:$PATH"
 # NOTE: adding a raw TCP probe to :443 first makes sshd log 'banner exchange:
 # invalid format' and stales the following SSH handshake — do not add one.
 # ---------------------------------------------------------------------------
+EXPECTED_IP="198.44.157.34"
 TUNNEL_HOST="140.238.139.20"
 TUNNEL_USER="ubuntu"
 TUNNEL_KEY="/tmp/tunnel_key"
 TUNNEL_PORT=1080
 TUNNEL_SSH_PORT=443
+REQUIRE_TUNNEL="${REQUIRE_TUNNEL:-0}"
 
 # Write SSH key from env var to file (never baked into image)
 if [ -z "${VPS_SSH_KEY:-}" ]; then
 	# Clean up any stale key from a previous container start
 	rm -f "$TUNNEL_KEY" 2>/dev/null || true
-	echo "WARNING: VPS_SSH_KEY not set — AirVPN tunnel will NOT start"
+	echo "WARNING: VPS_SSH_KEY not set — AirVPN tunnel will NOT start" >&2
+	if [ "${REQUIRE_TUNNEL:-0}" = "1" ]; then
+		echo "CRITICAL: REQUIRE_TUNNEL=1 but VPS_SSH_KEY is empty — refusing to start code-server" >&2
+		exit 1
+	fi
 else
 	echo "$VPS_SSH_KEY" > "$TUNNEL_KEY"
 	chmod 600 "$TUNNEL_KEY"
@@ -193,14 +199,15 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 		"${TUNNEL_USER}@${TUNNEL_HOST}" \
 		2>>/tmp/airvpn-tunnel.log &
 
-	# Wait for the tunnel to come up (max 12s)
-	for i in $(seq 1 24); do
-		if NO_PROXY= no_proxy= curl -sS --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 https://api.ipify.org >/dev/null 2>&1; then
-			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST}"
+	# Wait for the tunnel to come up with verified AirVPN egress IP (up to 30s)
+	for i in $(seq 1 30); do
+		egress_ip=$(NO_PROXY= no_proxy= curl -sSf --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 --max-time 4 https://api.ipify.org 2>/dev/null || true)
+		if [ "$egress_ip" = "$EXPECTED_IP" ]; then
+			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST} (verified egress IP: ${egress_ip})"
 			tunnel_ok=true
 			break
 		fi
-		sleep 0.5
+		sleep 1
 	done
 fi
 
@@ -249,10 +256,45 @@ PROXYEOF
 	export no_proxy="$NO_PROXY"
 else
 	if [ -n "${VPS_SSH_KEY:-}" ]; then
-		echo "WARNING: AirVPN tunnel failed to establish — running WITHOUT proxy"
+		echo "WARNING: AirVPN tunnel failed to establish" >&2
 	fi
-	echo "WARNING: No tunnel — running code-server unprotected"
+	if [ "${REQUIRE_TUNNEL:-0}" = "1" ]; then
+		echo "CRITICAL: REQUIRE_TUNNEL=1 but AirVPN tunnel failed to establish — refusing to run code-server unprotected" >&2
+		exit 1
+	fi
+	echo "WARNING: No tunnel — running code-server unprotected" >&2
 fi
+
+# ---------------------------------------------------------------------------
+# Remote Docker host setup (dedicated Oracle Cloud Docker instance on port 443)
+# ---------------------------------------------------------------------------
+if [ -n "${VPS_SSH_KEY:-}" ]; then
+	mkdir -p /root/.ssh /config/.ssh /home/abc/.ssh
+	printf "%s\n" "$VPS_SSH_KEY" > /root/.ssh/id_ed25519
+	printf "%s\n" "$VPS_SSH_KEY" > /config/.ssh/id_ed25519
+	printf "%s\n" "$VPS_SSH_KEY" > /home/abc/.ssh/id_ed25519
+	chmod 600 /root/.ssh/id_ed25519 /config/.ssh/id_ed25519 /home/abc/.ssh/id_ed25519 2>/dev/null || true
+	chown -R abc:abc /home/abc/.ssh /config/.ssh 2>/dev/null || true
+
+	cat << 'SSHEOF' > /root/.ssh/config
+Host 132.145.108.162 docker-host
+    HostName 132.145.108.162
+    Port 443
+    User ubuntu
+    IdentityFile /root/.ssh/id_ed25519
+    StrictHostKeyChecking no
+SSHEOF
+	chmod 600 /root/.ssh/config
+	cp /root/.ssh/config /config/.ssh/config 2>/dev/null || true
+	cp /root/.ssh/config /home/abc/.ssh/config 2>/dev/null || true
+
+	ssh-keyscan -p 443 132.145.108.162 >> /root/.ssh/known_hosts 2>/dev/null || true
+	ssh-keyscan -p 443 132.145.108.162 >> /config/.ssh/known_hosts 2>/dev/null || true
+	ssh-keyscan -p 443 132.145.108.162 >> /home/abc/.ssh/known_hosts 2>/dev/null || true
+fi
+
+# Ensure default DOCKER_HOST is exported for terminal sessions
+export DOCKER_HOST="${DOCKER_HOST:-ssh://ubuntu@132.145.108.162:443}"
 
 # Direct bind, password required
 exec /app/code-server/bin/code-server \
