@@ -307,32 +307,43 @@ fi
 # The service's EXTENSIONS_GALLERY variable already points code-server at the
 # Microsoft marketplace, so --install-extension pulls normal (auto-updating)
 # builds. This block:
-#   1. Installs GitHub.copilot + GitHub.copilot-chat if missing.
-#   2. One-time migration: removes legacy OpenVSX "-universal" extension dirs
-#      and reinstalls each as a regular marketplace build (they then auto-
-#      update like desktop VS Code).
-#   3. Forces extensions.autoUpdate on via Machine settings.
+#   1. Purges stale extensions.json entries pointing at deleted dirs.
+#   2. Installs GitHub.copilot (Copilot Chat is bundled in code-server).
+#   3. Migrates legacy OpenVSX "-universal" builds to regular marketplace
+#      builds (one-time, marker-guarded) — they then auto-update like desktop.
+#   4. Forces extensions.autoUpdate on via Machine settings.
+#
+# IMPORTANT: installs run as user abc (the runtime user). Installing as root
+# leaves root-owned dirs that code-server (running as abc) cannot register,
+# which makes extensions vanish from the UI.
 # ---------------------------------------------------------------------------
 CS_BIN=/app/code-server/bin/code-server
 EXT_DIR=/config/extensions
 DATA_DIR=/config/data
 
 install_ext() {
-	if "$CS_BIN" --extensions-dir "$EXT_DIR" --user-data-dir "$DATA_DIR" \
-		--install-extension "$1" --force >/dev/null 2>&1; then
-		echo "[entrypoint] Installed/updated extension: $1"
-	else
-		echo "[entrypoint] WARNING: failed to install extension: $1" >&2
-	fi
+	su abc -s /bin/bash -c "$CS_BIN --extensions-dir $EXT_DIR --user-data-dir $DATA_DIR --install-extension $1 --force" >/dev/null 2>&1 \
+		&& echo "[entrypoint] Installed/updated extension: $1" \
+		|| echo "[entrypoint] WARNING: failed to install extension: $1" >&2
 }
 
-# 1) Copilot agent + Chat UI
-if [ ! -d "$EXT_DIR/github.copilot" ] || [ ! -d "$EXT_DIR/GitHub.copilot-chat" ]; then
-	install_ext GitHub.copilot
-	install_ext GitHub.copilot-chat
-fi
+# 0) Drop registry entries whose extension dir no longer exists on disk
+python3 - << 'PYEOF' 2>/dev/null || true
+import json, os
+p = os.path.join(os.environ.get('EXT_DIR', '/config/extensions'), 'extensions.json')
+if os.path.exists(p):
+    data = json.load(open(p))
+    kept = [e for e in data if os.path.isdir(e.get('location', {}).get('path', ''))]
+    if len(kept) != len(data):
+        json.dump(kept, open(p, 'w'))
+        print(f'[entrypoint] Purged {len(data)-len(kept)} stale registry entries')
+PYEOF
 
-# 2) Migrate OpenVSX "-universal" builds to regular marketplace extensions
+# 1) Copilot agent (Copilot Chat is bundled in code-server at a newer version;
+#    installing the marketplace build would be a downgrade and is refused)
+[ -d "$EXT_DIR/github.copilot" ] || install_ext GitHub.copilot
+
+# 2) One-time migration of OpenVSX "-universal" builds to marketplace builds
 MIGRATION_MARKER="$DATA_DIR/.universal-exts-migrated"
 if [ ! -f "$MIGRATION_MARKER" ]; then
 	for d in "$EXT_DIR"/*-universal; do
@@ -349,6 +360,8 @@ if [ ! -f "$MIGRATION_MARKER" ]; then
 	mkdir -p "$DATA_DIR"
 	touch "$MIGRATION_MARKER"
 fi
+
+chown -R abc:abc "$EXT_DIR" 2>/dev/null || true
 
 # 3) Ensure extension auto-update is enabled (Machine scope)
 mkdir -p "$DATA_DIR/Machine"
