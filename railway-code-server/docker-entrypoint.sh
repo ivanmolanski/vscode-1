@@ -301,6 +301,65 @@ KHEOF
 	export DOCKER_HOST="${DOCKER_HOST:-ssh://ubuntu@132.145.108.162:443}"
 fi
 
+# ---------------------------------------------------------------------------
+# Extension management — everything as REGULAR marketplace extensions.
+#
+# The service's EXTENSIONS_GALLERY variable already points code-server at the
+# Microsoft marketplace, so --install-extension pulls normal (auto-updating)
+# builds. This block:
+#   1. Installs GitHub.copilot + GitHub.copilot-chat if missing.
+#   2. One-time migration: removes legacy OpenVSX "-universal" extension dirs
+#      and reinstalls each as a regular marketplace build (they then auto-
+#      update like desktop VS Code).
+#   3. Forces extensions.autoUpdate on via Machine settings.
+# ---------------------------------------------------------------------------
+CS_BIN=/app/code-server/bin/code-server
+EXT_DIR=/config/extensions
+DATA_DIR=/config/data
+
+install_ext() {
+	if "$CS_BIN" --extensions-dir "$EXT_DIR" --user-data-dir "$DATA_DIR" \
+		--install-extension "$1" --force >/dev/null 2>&1; then
+		echo "[entrypoint] Installed/updated extension: $1"
+	else
+		echo "[entrypoint] WARNING: failed to install extension: $1" >&2
+	fi
+}
+
+# 1) Copilot agent + Chat UI
+if [ ! -d "$EXT_DIR/github.copilot" ] || [ ! -d "$EXT_DIR/GitHub.copilot-chat" ]; then
+	install_ext GitHub.copilot
+	install_ext GitHub.copilot-chat
+fi
+
+# 2) Migrate OpenVSX "-universal" builds to regular marketplace extensions
+MIGRATION_MARKER="$DATA_DIR/.universal-exts-migrated"
+if [ ! -f "$MIGRATION_MARKER" ]; then
+	for d in "$EXT_DIR"/*-universal; do
+		[ -d "$d" ] || continue
+		ext_id=$(node -e "const p=require('$d/package.json'); console.log(p.publisher+'.'+p.name)" 2>/dev/null || true)
+		if [ -n "$ext_id" ]; then
+			echo "[entrypoint] Migrating $ext_id from OpenVSX build to marketplace build..."
+			rm -rf "$d"
+			install_ext "$ext_id"
+		else
+			echo "[entrypoint] WARNING: could not resolve id for $d — leaving in place" >&2
+		fi
+	done
+	mkdir -p "$DATA_DIR"
+	touch "$MIGRATION_MARKER"
+fi
+
+# 3) Ensure extension auto-update is enabled (Machine scope)
+mkdir -p "$DATA_DIR/Machine"
+SETTINGS_JSON="$DATA_DIR/Machine/settings.json"
+if [ -f "$SETTINGS_JSON" ]; then
+	grep -q '"extensions.autoUpdate"' "$SETTINGS_JSON" || \
+		node -e "const fs=require('fs');const p='$SETTINGS_JSON';const s=JSON.parse(fs.readFileSync(p,'utf8'));s['extensions.autoUpdate']=true;s['extensions.autoCheckUpdates']=true;fs.writeFileSync(p,JSON.stringify(s,null,2))" 2>/dev/null || true
+else
+	printf '{\n  "extensions.autoUpdate": true,\n  "extensions.autoCheckUpdates": true\n}\n' > "$SETTINGS_JSON"
+fi
+
 # Direct bind, password required
 exec /app/code-server/bin/code-server \
 	--bind-addr "[::]:8443" \
