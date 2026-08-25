@@ -373,6 +373,27 @@ else
 	printf '{\n  "extensions.autoUpdate": true,\n  "extensions.autoCheckUpdates": true\n}\n' > "$SETTINGS_JSON"
 fi
 
+# ---------------------------------------------------------------------------
+# 4) Patch the SERVED product.json with the marketplace gallery.
+#
+# The browser workbench fetches /product.json at page load and uses its
+# extensionsGallery for the Extensions panel (search, recommendations,
+# details). The EXTENSIONS_GALLERY env var only patches the server-side
+# process — without this patch the browser gets extensionsGallery:null and
+# falls back to Open VSX (no Copilot, thin search).
+# ---------------------------------------------------------------------------
+PRODUCT_JSON=/app/code-server/lib/vscode/product.json
+if [ -f "$PRODUCT_JSON" ] && [ -n "${EXTENSIONS_GALLERY:-}" ]; then
+	node -e "
+const fs = require('fs');
+const p = '$PRODUCT_JSON';
+const product = JSON.parse(fs.readFileSync(p, 'utf8'));
+product.extensionsGallery = JSON.parse(process.env.EXTENSIONS_GALLERY);
+fs.writeFileSync(p, JSON.stringify(product, null, 2));
+console.log('[entrypoint] Patched served product.json with marketplace gallery');
+" 2>/dev/null || echo "[entrypoint] WARNING: failed to patch product.json" >&2
+fi
+
 # Direct bind, password required
 exec /app/code-server/bin/code-server \
 	--bind-addr "[::]:8443" \
