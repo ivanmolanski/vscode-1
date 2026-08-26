@@ -186,18 +186,6 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 	export AUTOSSH_PIDFILE=/run/airvpn-tunnel.pid
 	export AUTOSSH_LOGFILE=/tmp/airvpn-tunnel.log
 	export AUTOSSH_PORT=0
-	# Try a one-shot SSH first to capture the exact error before forking autossh
-	echo "[entrypoint] Testing SSH connection to ${TUNNEL_USER}@${TUNNEL_HOST}:${TUNNEL_SSH_PORT}..."
-	ssh -v -N \
-		-o StrictHostKeyChecking=yes \
-		-o UserKnownHostsFile=/root/.ssh/known_hosts \
-		-o ConnectTimeout=10 \
-		-o BatchMode=yes \
-		-p "${TUNNEL_SSH_PORT}" \
-		-i "$TUNNEL_KEY" \
-		"${TUNNEL_USER}@${TUNNEL_HOST}" \
-		2>&1 | head -40 || true
-	echo "[entrypoint] SSH test done, starting autossh..."
 	nohup autossh -M 0 -f -N \
 		-o StrictHostKeyChecking=yes \
 		-o UserKnownHostsFile=/root/.ssh/known_hosts \
