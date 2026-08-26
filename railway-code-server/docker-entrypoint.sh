@@ -285,10 +285,11 @@ Host 132.145.108.162 docker-host
     StrictHostKeyChecking yes
 SSHEOF
 
-	# Pinned host key — fetched out-of-band from the instance itself
+	# Pinned host keys — fetched out-of-band from each instance
 	# (cat /etc/ssh/ssh_host_ed25519_key.pub), NOT via ssh-keyscan.
-	# If the host is rebuilt and its key changes, connections fail closed.
+	# If a host is rebuilt and its key changes, connections fail closed.
 	cat << 'KHEOF' >> /root/.ssh/known_hosts
+140.238.139.20 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1FePPG7b/9e89XTFwtm9RxRiufeGCBKybqEzeo0+cC
 132.145.108.162 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJSsWiBzkqipz+KYKBuwvhEJFLf0TvnaN0kYa2j+srry
 KHEOF
 	chmod 600 /root/.ssh/config /root/.ssh/known_hosts
