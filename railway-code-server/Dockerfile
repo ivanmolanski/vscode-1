@@ -40,6 +40,7 @@ RUN apt-get update && \
 	python3-dev \
 	docker.io \
 	iproute2 \
+	socat \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -250,6 +251,9 @@ RUN set -eux; \
 	/usr/sbin/privoxy --version; \
 	echo "All toolchains OK"
 
-EXPOSE 8443
+# 8443 is the canonical code-server port. 8080 is also exposed because Railway
+# injects PORT=8080 at runtime and may probe/route to either; the entrypoint
+# binds $PORT and relays the other port to it, so both always answer.
+EXPOSE 8443 8080
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

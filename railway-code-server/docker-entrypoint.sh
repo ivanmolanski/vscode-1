@@ -37,11 +37,24 @@ if [ -z "$CS_PASSWORD" ]; then
 	echo "Generated new code-server login password (stored in /config/.code-server-password)"
 fi
 
+# ---------------------------------------------------------------------------
+# Listen port.
+#
+# code-server applies $PORT AFTER --bind-addr, so an injected PORT silently
+# wins over the flag. Railway injects PORT=8080 at runtime while the image
+# EXPOSEs 8443 — that mismatch is what made the platform healthcheck fail with
+# "service unavailable" even though code-server was up (it was on 8080, the
+# probe went to 8443). So: bind $PORT explicitly (8443 when unset, e.g. plain
+# `docker run`) and relay the other well-known port to it below, so whichever
+# port Railway routes/probes always answers.
+# ---------------------------------------------------------------------------
+CS_PORT="${PORT:-8443}"
+
 # Write the config with auth=password. Update checks stay ENABLED (no
 # disable-update-check) so you are always prompted for newer versions.
 mkdir -p /config/.config/code-server
 cat > /config/.config/code-server/config.yaml <<EOF
-bind-addr: 0.0.0.0:8443
+bind-addr: 0.0.0.0:${CS_PORT}
 auth: password
 password: ${CS_PASSWORD}
 disable-telemetry: true
@@ -404,9 +417,34 @@ try {
 " 2>/dev/null || echo "[entrypoint] WARNING: failed to patch product.json" >&2
 fi
 
+# ---------------------------------------------------------------------------
+# Port relay: forward every other well-known port to the port code-server is
+# actually bound to, so Railway's router/healthcheck reaches it no matter which
+# port it picks (EXPOSE 8443 vs injected PORT=8080). Plain TCP forwarding, so
+# WebSockets (terminals, remote extension host) pass through untouched.
+# ipv6only=0 makes the listener serve IPv4 and IPv6 alike. Best effort: a
+# failing relay never blocks startup.
+# ---------------------------------------------------------------------------
+for alt_port in 8443 8080; do
+	[ "$alt_port" = "$CS_PORT" ] && continue
+	if ss -tln | grep -q ":${alt_port} "; then
+		echo "[entrypoint] Port ${alt_port} already in use — skipping relay" >&2
+		continue
+	fi
+	if command -v socat >/dev/null 2>&1; then
+		socat "TCP6-LISTEN:${alt_port},fork,reuseaddr,ipv6only=0" \
+			"TCP:127.0.0.1:${CS_PORT}" >/dev/null 2>&1 &
+		echo "[entrypoint] Relaying :${alt_port} -> :${CS_PORT}"
+	else
+		echo "[entrypoint] WARNING: socat missing — no relay for :${alt_port}" >&2
+	fi
+done
+
+echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
+
 # Direct bind, password required
 exec /app/code-server/bin/code-server \
-	--bind-addr "[::]:8443" \
+	--bind-addr "[::]:${CS_PORT}" \
 	--config /config/.config/code-server/config.yaml \
 	--user-data-dir /config/data \
 	--extensions-dir /config/extensions \
