@@ -19,7 +19,7 @@ else
     echo "No existing Privoxy listener found, starting one..."
     sudo /usr/sbin/privoxy --no-daemon /etc/privoxy/config &
     PRIVOXY_PID=$!
-    trap "kill $PRIVOXY_PID 2>/dev/null" EXIT
+    trap 'kill "$PRIVOXY_PID" 2>/dev/null' EXIT
     sleep 2
     if CURL_OUT=$(curl -sS --max-time 3 --proxy http://127.0.0.1:8118 https://api.ipify.org 2>&1); then
         CURL_RC=0

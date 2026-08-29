@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """Open port 1080 in Oracle VCN security list using local OCI API key."""
-import oci
 import os
 import sys
+
+import oci
 
 SOURCE_CIDR = os.environ.get("ALLOWED_SOURCE_CIDR", "0.0.0.0/0")
 
@@ -74,7 +76,7 @@ for sl_id in target_sl_ids:
                 print(f"    WARNING: Port 1080 covered by {rule.source} but expected {SOURCE_CIDR}")
 
     if not has_1080 or not has_matching_source:
-        print(f"    Adding TCP 1080 ingress rule...")
+        print("    Adding TCP 1080 ingress rule...")
         existing_rules.append(
             oci.core.models.IngressSecurityRule(
                 source=SOURCE_CIDR,

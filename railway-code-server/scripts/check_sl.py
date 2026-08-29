@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """Check VCN security lists via OCI API."""
+import json
 import sys
 import time
+import urllib.request
+
 import oci
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
-import json, urllib.request
 
 # Optional: restrict to one security list by OCID (e.g. sys.argv[1]).
 filter_sl_id = sys.argv[1] if len(sys.argv) > 1 else None

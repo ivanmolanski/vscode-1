@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# ruff: noqa: PLW1510  # intentional: manual rc check in ops script
 """Full apt update + upgrade on the VPS, with reboot check.
 
 Configuration via environment (defaults preserved):

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """Get instance metadata from OCI IMDS."""
 import json
 import sys

@@ -110,7 +110,7 @@ cleanup_stale_tunnel() {
 		if [[ "$pid" =~ ^[0-9]+$ ]] && [ -d "/proc/$pid" ]; then
 			# Verify the process command line matches our tunnel
 			local cmdline
-			cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' || true)
+			cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
 			if [[ "$cmdline" == *"$TUNNEL_HOST"* ]] && { [[ "$cmdline" == *"autossh"* ]] || [[ "$cmdline" == *"ssh"*"-D"* ]]; }; then
 				echo "Stopping stale tunnel (PID $pid) from pidfile"
 				kill "$pid" 2>/dev/null || true
@@ -214,7 +214,7 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 
 	# Wait for the tunnel to come up with verified AirVPN egress IP (up to 30s)
 	for i in $(seq 1 30); do
-		egress_ip=$(NO_PROXY= no_proxy= curl -sSf --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 --max-time 4 https://api.ipify.org 2>/dev/null || true)
+		egress_ip=$(NO_PROXY='' no_proxy='' curl -sSf --proxy socks5h://127.0.0.1:${TUNNEL_PORT} --connect-timeout 2 --max-time 4 https://api.ipify.org 2>/dev/null || true)
 		if [ "$egress_ip" = "$EXPECTED_IP" ]; then
 			echo "AirVPN tunnel UP via SSH to ${TUNNEL_HOST} (verified egress IP: ${egress_ip})"
 			tunnel_ok=true
@@ -238,7 +238,7 @@ PROXYEOF
 	PRIVOXY_PID=$!
 	# Poll for privoxy readiness instead of blind sleep
 	for i in $(seq 1 10); do
-		if kill -0 $PRIVOXY_PID 2>/dev/null && NO_PROXY= no_proxy= curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
+		if kill -0 $PRIVOXY_PID 2>/dev/null && NO_PROXY='' no_proxy='' curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 1 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
 			break
 		fi
 		sleep 0.5
@@ -247,7 +247,7 @@ PROXYEOF
 		echo "CRITICAL: Privoxy failed to start — exiting" >&2
 		exit 1
 	fi
-	if ! NO_PROXY= no_proxy= curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
+	if ! NO_PROXY='' no_proxy='' curl -sS --proxy http://127.0.0.1:8118 --connect-timeout 2 --max-time 5 https://api.ipify.org >/dev/null 2>&1; then
 		echo "CRITICAL: Privoxy not reachable on :8118 — exiting" >&2
 		kill $PRIVOXY_PID 2>/dev/null
 		exit 1

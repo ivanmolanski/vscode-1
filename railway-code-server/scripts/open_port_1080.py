@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """Open port 1080 in Oracle VCN security list using OCI Python SDK + instance principals."""
-import oci
 import json
 import os
 import sys
 import urllib.request
+
+import oci
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
 
 IMDS_BASE = "http://169.254.169.254/opc/v2"

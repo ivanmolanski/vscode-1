@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """
 Add TCP port 1080 to an Oracle VCN security list.
 Usage: python3 add_firewall_rule.py <security-list-ocid> <compartment-ocid>

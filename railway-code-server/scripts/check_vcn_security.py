@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """Check Oracle VCN security list via OCI API."""
-import oci
-from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
 import json
 import sys
+import time
 import urllib.request
+
+import oci
+from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
 
 # Signer construction may also hit IMDS (federation endpoint), so build it
 # inside the same bounded retry path as the metadata request.
@@ -27,7 +30,7 @@ for attempt in range(3):
         if attempt == 2:
             print(f"ERROR: IMDS unreachable after 3 attempts: {e}", file=sys.stderr)
             sys.exit(1)
-        import time; time.sleep(1)
+        time.sleep(1)
 
 region = inst["region"]  # type: ignore[union-attr]
 compartment = inst["compartmentId"]  # type: ignore[union-attr]

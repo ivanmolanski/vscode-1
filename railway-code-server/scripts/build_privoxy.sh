@@ -13,7 +13,7 @@ autoconf
 ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --enable-static
 
 echo "=== Build ==="
-make -j$(nproc)
+make -j"$(nproc)"
 
 echo "=== Install ==="
 sudo make install

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """Get compartment, VNIC, subnet, VCN, and security-list OCIDs from instance metadata."""
 import json
 import sys

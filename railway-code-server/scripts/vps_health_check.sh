@@ -17,6 +17,7 @@ is_valid_ipv4() {
         ''|*[!0-9.]*) return 1 ;;
     esac
     local IFS='.'
+    # shellcheck disable=SC2086 # intentional: split $1 into octets via IFS
     set -- $1
     [ $# -eq 4 ] || return 1
     for octet in "$@"; do

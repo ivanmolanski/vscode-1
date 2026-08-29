@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001  # intentional: broad catch to print error + exit in ops script
 """
 Open port 1080 in Oracle VCN security list via VNIC → subnet resolution.
 Uses instance-principal authentication.
 """
-import oci
 import json
 import os
 import sys
 import urllib.request
 
+import oci
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
 
 IMDS_BASE = "http://169.254.169.254/opc/v2"
@@ -112,7 +113,7 @@ for sl_id in target_sl_ids:
         success = True
         continue
 
-    print(f"  Adding port 1080 ingress rule...")
+    print("  Adding port 1080 ingress rule...")
     existing_rules.append(
         oci.core.models.IngressSecurityRule(
             source=SOURCE_CIDR,

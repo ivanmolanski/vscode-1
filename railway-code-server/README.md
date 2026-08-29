@@ -60,44 +60,58 @@ instead of surfacing later inside the running container.
 6. **Domain** — add `code-server.up.railway.app` or a custom domain → generates
    an HTTPS URL for the GUI.
 
-## VPN exit-node egress (AirVPN via Oracle)
+## VPN exit-node egress (AirVPN via Oracle VPS)
 
-The `code-server` service egresses through the `tailscale-vpn` sibling service's
-userspace SOCKS5/HTTP proxy, which routes through a Tailscale exit node (the
-Oracle VPS AirVPN gateway). This is wired via Railway **reference variables**
-that resolve the sibling service's private domain dynamically. Port `1055`
-simultaneously serves both SOCKS5 and HTTP CONNECT — the `tailscaled`
-`--socks5-server`/`--outbound-http-proxy-listen` listeners are multiplexed on
-one port via `proxymux`. The reference URL scheme below (`socks5h://` for
-SOCKS5, `http://` for HTTP) works with both.
+The `code-server` service egresses through an **autossh SOCKS5 tunnel to an
+Oracle VPS** that runs Eddie (AirVPN) full-tunnel. There is **no Tailscale** in
+this design. The tunnel is established inside the container by
+`docker-entrypoint.sh`:
 
-Set the proxy variables on `code-server` in the **same Railway project and
-environment** as the `tailscale-vpn` service. Explicitly pass `--environment`
-(or ensure your active `railway link` targets the correct environment), since a
-stale link to another environment would make
-`${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}` reference variables and the
-`tailscale-vpn.railway.internal` DNS name unresolvable:
-
-```bash
-railway variable set \
-  --environment production \
-  'ALL_PROXY=socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
-  'all_proxy=socks5h://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
-  'HTTP_PROXY=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
-  'http_proxy=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
-  'HTTPS_PROXY=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
-  'https_proxy=http://${{tailscale-vpn.RAILWAY_PRIVATE_DOMAIN}}:1055' \
-  --service code-server
+```
+Browser ──> code-server (Railway, $PORT / 8443)
+                │
+                ├─ direct egress ──────────────> Railway egress IP (NOT stable)
+                │
+                └─ privoxy :8118 (HTTP→SOCKS bridge)
+                        │
+                        └─ autossh SOCKS5 :1080 ──SSH:443──> Oracle VPS (Eddie/AirVPN)
+                                                                │
+                                                                └─ egress ──> AirVPN IP
 ```
 
-These variables only take effect for clients that honor them (e.g. `curl`,
-`wget`, Go, Node/`fetch` where supported). They are **not** a service-wide
-egress guarantee — applications that ignore `*_proxy`/`NO_PROXY` conventions
-will still connect over Railway's normal network. If you want the whole
-container to egress via the exit node, run your app under a wrapper that forces
-the proxy, or set this at the process level.
+### How it's wired (all inside the container — no sibling service)
 
-Verify egress exits through AirVPN (returns the AirVPN public IP, not Railway's).
+- `docker-entrypoint.sh` writes `VPS_SSH_KEY` to `/root/.ssh/id_ed25519` and
+  starts `autossh -M 0 -N -D 1080` to the VPS on **port 443** (Railway blocks
+  outbound 22). Host keys are **pinned** in `known_hosts` (fetched out-of-band,
+  not via `ssh-keyscan`) with `StrictHostKeyChecking=yes`.
+- The tunnel gate polls the SOCKS listener via `api.ipify.org` (max ~12s) and
+  only then starts privoxy on `:8118` as an HTTP→SOCKS5 bridge (Node.js/Copilot
+  `fetch` needs an HTTP proxy; curl/git honor SOCKS5 directly).
+- Proxy env is set **locally** in the container (no Railway reference
+  variables needed):
+  - `ALL_PROXY=socks5h://127.0.0.1:1080`
+  - `HTTP(S)_PROXY=http://127.0.0.1:8118`
+  - `NO_PROXY` preserves inherited exclusions and appends
+    `localhost,127.0.0.1,::1,.railway.internal,10.0.0.0/8,.svc,.cluster.local,.internal`
+- `REQUIRE_TUNNEL=1` is a kill switch: if the tunnel fails to establish,
+  code-server refuses to start rather than running unprotected.
+
+### Variables
+
+| Variable | Purpose |
+|---|---|
+| `VPS_SSH_KEY` | Private key for the Oracle VPS tunnel (required for the tunnel) |
+| `REQUIRE_TUNNEL` | `1` = refuse to start code-server if the tunnel is down (default `0`) |
+| `PASSWORD` / `HASHED_PASSWORD` | Web GUI login |
+| `SUDO_PASSWORD` | sudo in the integrated terminal |
+| `DEFAULT_WORKSPACE` | `/config/workspace` |
+| `TZ` | `Etc/UTC` |
+
+### Verify egress exits through AirVPN
+
+These proxy vars only take effect for clients that honor them (curl, wget, Go,
+Node/`fetch` where supported); they are not a service-wide egress guarantee.
 Clear `NO_PROXY`/`no_proxy` so the request cannot bypass the configured proxy,
 and use HTTPS to exercise the CONNECT path. `railway ssh` runs in the same
 project/environment as the linked service:
@@ -106,6 +120,9 @@ project/environment as the linked service:
 railway ssh --service code-server \
   "NO_PROXY= no_proxy= curl -fsS --max-time 25 https://api.ipify.org"
 ```
+
+A healthy tunnel returns the AirVPN public IP (e.g. `213.152.162.5`), not
+Railway's egress IP.
 
 ## After deploy
 
