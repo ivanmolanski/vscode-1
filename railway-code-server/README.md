@@ -107,6 +107,23 @@ Browser ──> code-server (Railway, $PORT / 8443)
 | `SUDO_PASSWORD` | sudo in the integrated terminal |
 | `DEFAULT_WORKSPACE` | `/config/workspace` |
 | `TZ` | `Etc/UTC` |
+| `EXTENSIONS_GALLERY` | JSON pointing code-server at the **standard Microsoft marketplace** so extensions install as native, auto-updating builds. The entrypoint patches the served `product.json` with this value. Set it to: `{"serviceUrl":"https://marketplace.visualstudio.com/_apis/public/gallery","itemUrl":"https://marketplace.visualstudio.com/items","publisherUrl":"https://marketplace.visualstudio.com/publishers","resourceUrlTemplate":"https://{publisher}.vscode-unpkg.net/{publisher}/{name}/{version}/{path}"}` |
+
+### Extensions & the standard marketplace
+
+All extensions install as **native Microsoft marketplace builds** (not OpenVSX).
+The entrypoint:
+1. Purges stale `extensions.json` entries pointing at deleted dirs.
+2. Installs `GitHub.copilot` (Copilot Chat is bundled in code-server).
+3. Migrates legacy OpenVSX `-universal` builds to marketplace builds (one-time,
+   marker-guarded) — they then auto-update like desktop.
+4. Forces `extensions.autoUpdate` on via Machine settings.
+5. Patches the served `product.json` with `EXTENSIONS_GALLERY` so the browser
+   Extensions panel gets search/recommendations from the Microsoft marketplace.
+
+Installs run as user `abc` (the runtime user) — installing as root leaves
+root-owned dirs code-server can't register, which makes extensions vanish from
+the UI.
 
 ### Verify egress exits through AirVPN
 
