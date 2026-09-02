@@ -15,8 +15,6 @@ RUN mkdir -p /config/apt-state && \
 
 # ---------------------------------------------------------------------------
 # Developer toolchains & default packages (kept in the image, not in the volume)
-# Includes tunnel deps (autossh, autoconf, libpcre2-dev, zlib1g-dev) to
-# avoid a second apt-get layer. build-essential/libssl-dev are shared.
 # ---------------------------------------------------------------------------
 RUN apt-get update && \
 	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -53,10 +51,6 @@ RUN apt-get update && \
 	python3-dev \
 	docker.io \
 	iproute2 \
-	autossh \
-	autoconf \
-	libpcre2-dev \
-	zlib1g-dev \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -225,9 +219,17 @@ COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 # traffic through AirVPN. ALL_PROXY points to localhost:1080 (the tunnel).
 # Privoxy 4.2.0 provides an HTTP proxy on :8118 that forwards to the SOCKS5
 # tunnel, for applications (like Node.js/Copilot) that don't honor socks5h://.
-# NOTE: autossh, autoconf, libpcre2-dev, zlib1g-dev already installed in
-# the main apt-get layer — no second apt-get needed.
 # ---------------------------------------------------------------------------
+RUN apt-get update && \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+	autossh \
+	autoconf \
+	libpcre2-dev \
+	libssl-dev \
+	zlib1g-dev \
+	build-essential \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
 
 # Build privoxy 4.2.0 from source (Ubuntu only ships 3.x)
 RUN cd /tmp && \
