@@ -11,6 +11,25 @@
 
 set -e
 
+# ---------------------------------------------------------------------------
+# APT STATE RESTORATION — restore apt lists from /config volume so
+# apt-get upgrade/update works at runtime without rebuilding the image.
+# ---------------------------------------------------------------------------
+if [ -d /config/apt-state/lib/apt/lists ] && [ "$(ls -A /config/apt-state/lib/apt/lists 2>/dev/null)" ]; then
+	mkdir -p /var/lib/apt/lists/partial
+	cp -a /config/apt-state/lib/apt/* /var/lib/apt/ 2>/dev/null || true
+	echo "[entrypoint] Restored apt lists from /config/apt-state"
+fi
+if [ -d /config/apt-state/cache ] && [ "$(ls -A /config/apt-state/cache 2>/dev/null)" ]; then
+	cp -a /config/apt-state/cache/* /var/cache/apt/ 2>/dev/null || true
+fi
+# Keep apt state in sync: after any apt operation, save to /config
+save_apt_state() {
+	cp -a /var/lib/apt/* /config/apt-state/lib/ 2>/dev/null || true
+	cp -a /var/cache/apt/* /config/apt-state/cache/ 2>/dev/null || true
+}
+trap save_apt_state EXIT
+
 # Strip any stale `source .../.cargo/env` (or `. "$CARGO_HOME/env"`) lines that
 # rustup may have injected into shell profiles. These lines error on every
 # terminal open ("bash: /config/.cargo/env: No such file or directory") when the
@@ -52,6 +71,23 @@ chown -R abc:abc /config 2>/dev/null || true
 # Ensure the npm global bin is on PATH for terminal sessions (redundant with
 # /usr/local already on PATH, but explicit never hurts)
 export PATH="/usr/local/bin:$PATH"
+
+# ---------------------------------------------------------------------------
+# PERSISTED TOOLS — symlink tools from /config volume into PATH so they
+# survive container restarts. Users who install apt packages at runtime
+# can add them here, or place binaries in /config/.local/bin.
+# ---------------------------------------------------------------------------
+mkdir -p /config/.local/bin
+export PATH="/config/.local/bin:$PATH"
+
+# Persist Railway CLI to /config if it exists in the image but user wants
+# a custom version — symlink from image install to /config
+if [ -x /usr/local/bin/railway ] && [ ! -x /config/.local/bin/railway ]; then
+	ln -sf /usr/local/bin/railway /config/.local/bin/railway 2>/dev/null || true
+fi
+
+# Persist any apt-installed binaries that users add at runtime
+# (users can also symlink their own binaries into /config/.local/bin)
 
 # ---------------------------------------------------------------------------
 # AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443).

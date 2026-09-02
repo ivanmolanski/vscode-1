@@ -66,6 +66,44 @@ This repository includes a Visual Studio Code Dev Containers / GitHub Codespaces
 
 Docker / the Codespace should have at least **4 cores and 6 GB of RAM (8 GB recommended)** to run a full build. See the [development container README](.devcontainer/README.md) for more information.
 
+## Railway Code Server Architecture
+
+This repository includes a Railway deployment for running VS Code (code-server) in the browser with full persistence.
+
+### Persistence Architecture
+
+The `/config` volume persists across container restarts. The following items survive restarts:
+
+| What | Where | Survives Restart |
+|------|-------|------------------|
+| Railway CLI | Image (`/usr/local/bin/railway`) | ✅ Yes (in image) |
+| APT cache/lists | `/config/apt-state/` | ✅ Yes (restored on start) |
+| Extensions | `/config/extensions/` | ✅ Yes (volume) |
+| User data | `/config/data/` | ✅ Yes (volume) |
+| Workspace | `/config/workspace/` | ✅ Yes (volume) |
+| SSH keys | `/config/.ssh/` | ✅ Yes (volume) |
+| Code-server password | `/config/.code-server-password` | ✅ Yes (volume) |
+| Persisted tools | `/config/.local/bin/` | ✅ Yes (volume) |
+
+### Running apt-get upgrade
+
+The entrypoint automatically restores APT state from `/config/apt-state/` on startup. You can run `apt-get update && apt-get upgrade` in the terminal and the changes persist across restarts.
+
+### Adding persistent tools
+
+Place binaries in `/config/.local/bin/` which is on PATH:
+
+```bash
+# Example: install a tool and persist it
+sudo cp /usr/bin/mytool /config/.local/bin/
+# Or symlink
+ln -s /path/to/tool /config/.local/bin/mytool
+```
+
+### AirVPN Tunnel
+
+The code-server connects to an Oracle VPS via SSH tunnel for AirVPN egress. Set `VPS_SSH_KEY` and `REQUIRE_TUNNEL=1` in Railway service variables to enable.
+
 ## Code of Conduct
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information, see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
