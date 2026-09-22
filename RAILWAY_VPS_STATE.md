@@ -72,6 +72,14 @@ set in a chain processed before the routing decision (mangle PREROUTING/OUTPUT �
 
 - Tunnel gate: autossh → poll SOCKS :1080 via api.ipify.org (max 12s) → only then start privoxy
 - Privoxy poll for readiness; CRITICAL aborts go to stderr (correct); status messages to stdout
+- **Privoxy config lives at `/etc/privoxy/config` with explicit `confdir` + `templdir`**
+  (`/usr/share/privoxy/templates`). Without them Privoxy defaults confdir to the
+  config file's directory and cannot render error pages — clients get
+  `500 Internal Privoxy Error: Could not load template file forwarding-failed`
+  instead of a useful error that apps can retry.
+- `NODE_OPTIONS=--max-old-space-size=6144` — the extension host OOMs at the default
+  ~4 GB V8 ceiling with several agent extensions loaded ("FATAL ERROR: Reached heap
+  limit"). Lower it via the env var if the Railway plan has less RAM.
 - Proxy env: `ALL_PROXY=socks5h://127.0.0.1:1080`, `HTTP(S)_PROXY=http://127.0.0.1:8118`,
   NO_PROXY preserves inherited + Railway-internal defaults
 - Stale-tunnel cleanup: root pidfile `/run/airvpn-tunnel.pid` + cmdline validation + bounded

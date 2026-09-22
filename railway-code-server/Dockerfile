@@ -64,9 +64,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - && \
 	rm -rf /var/lib/apt/lists/*
 
 # Railway CLI — installed at build time so it persists in the image.
-# Install globally via npm; the binary lives in /usr/local/bin (already on PATH).
-RUN npm install -g @railway/cli && \
-	railway --version || echo "Railway CLI installed"
+# Use the official installer (single static binary) instead of npm: the npm
+# package relies on a postinstall download that can silently fail and leave a
+# broken shim ("could not find the CLI binary"). -y skips the confirmation
+# prompt; --bin-dir puts the binary in /usr/local/bin (already on PATH).
+RUN curl -fsSL https://railway.com/install.sh | bash -s -- -y -b /usr/local/bin && \
+	railway --version
 
 # npm global installs live in /usr/local (already on PATH automatically,
 # just like npm --prefix on a local machine). With PUID=0 at runtime the
@@ -232,6 +235,9 @@ RUN apt-get update && \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Build privoxy 4.2.0 from source (Ubuntu only ships 3.x)
+# --prefix=/usr --sysconfdir=/etc installs templates to
+# /usr/share/privoxy/templates; the entrypoint points templdir there so error
+# pages render even though the running config lives in /etc/privoxy.
 RUN cd /tmp && \
 	wget -q http://deb.debian.org/debian/pool/main/p/privoxy/privoxy_4.2.0.orig.tar.gz && \
 	tar xzf privoxy_4.2.0.orig.tar.gz && \
@@ -240,6 +246,7 @@ RUN cd /tmp && \
 	./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var && \
 	make -j$(nproc) && \
 	make install && \
+	test -f /usr/share/privoxy/templates/forwarding-failed && \
 	rm -rf /tmp/privoxy-4.2.0-stable /tmp/privoxy_4.2.0.orig.tar.gz
 
 # Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var

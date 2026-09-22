@@ -76,10 +76,12 @@ The `/config` volume persists across container restarts. The following items sur
 
 | What | Where | Survives Restart |
 |------|-------|------------------|
-| Railway CLI | Image (`/usr/local/bin/railway`) | ✅ Yes (in image) |
+| Railway CLI | Image (`/usr/local/bin/railway`) + symlink in `/config/.local/bin` | ✅ Yes (self-healing: reinstalls latest if broken) |
 | APT cache/lists | `/config/apt-state/` | ✅ Yes (restored on start) |
 | Extensions | `/config/extensions/` | ✅ Yes (volume) |
 | User data | `/config/data/` | ✅ Yes (volume) |
+| Copilot agent settings | `/config/data/Machine/settings.json` | ✅ Yes (seeded every boot, applies to all repos) |
+| MCP servers (Global scope) | `/config/data/User/mcp.json` | ✅ Yes (volume — add servers at Global scope, not per-repo) |
 | Workspace | `/config/workspace/` | ✅ Yes (volume) |
 | SSH keys | `/config/.ssh/` | ✅ Yes (volume) |
 | Code-server password | `/config/.code-server-password` | ✅ Yes (volume) |
@@ -99,6 +101,23 @@ sudo cp /usr/bin/mytool /config/.local/bin/
 # Or symlink
 ln -s /path/to/tool /config/.local/bin/mytool
 ```
+
+### Copilot agent auto-approve
+
+The entrypoint seeds Machine-scope settings (`/config/data/Machine/settings.json`)
+on every boot so Copilot agent tools run without confirmation prompts or
+"assessed as high-risk" skips in any repo: risk assessment off, global
+auto-approve on, terminal auto-approve for all commands, edits auto-approve.
+It also seeds the storage flags (`chat.tools.global.autoApprove.optIn`,
+`chat.tools.terminal.autoApprove.warningAccepted`) so first-run dialogs never
+appear.
+
+### MCP server persistence
+
+MCP servers added at **Global** scope are stored in `/config/data/User/mcp.json`
+on the persistent volume and survive redeploys. Servers added per-repo
+(`.vscode/mcp.json` inside a cloned repo) are lost when the repo is re-cloned —
+prefer Global scope. The entrypoint seeds an empty `mcp.json` if missing.
 
 ### AirVPN Tunnel
 
