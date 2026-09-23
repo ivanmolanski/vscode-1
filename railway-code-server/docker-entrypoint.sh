@@ -92,7 +92,7 @@ fi
 if [ -x /usr/local/bin/railway ] && [ ! -x /config/.local/bin/railway ]; then
 	ln -sf /usr/local/bin/railway /config/.local/bin/railway 2>/dev/null || true
 fi
-railway --version >/dev/null 2>&1 && echo "[entrypoint] Railway CLI: $(railway --version 2>/dev/null | tail -1)" || echo "[entrypoint] WARNING: Railway CLI unavailable"
+railway --version >/dev/null 2>&1 && echo "[entrypoint] Railway CLI: $(railway --version 2>&1 | tail -1)" || echo "[entrypoint] WARNING: Railway CLI unavailable"
 
 # Persist any apt-installed binaries that users add at runtime
 # (users can also symlink their own binaries into /config/.local/bin)
