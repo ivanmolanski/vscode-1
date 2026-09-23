@@ -235,9 +235,9 @@ RUN apt-get update && \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Build privoxy 4.2.0 from source (Ubuntu only ships 3.x)
-# --prefix=/usr --sysconfdir=/etc installs templates to
-# /usr/share/privoxy/templates; the entrypoint points templdir there so error
-# pages render even though the running config lives in /etc/privoxy.
+# With --sysconfdir=/etc, make install puts templates in /etc/templates and
+# config files in /etc; the entrypoint points templdir there so error pages
+# render even though the running config lives in /etc/privoxy.
 RUN cd /tmp && \
 	wget -q http://deb.debian.org/debian/pool/main/p/privoxy/privoxy_4.2.0.orig.tar.gz && \
 	tar xzf privoxy_4.2.0.orig.tar.gz && \
@@ -246,7 +246,7 @@ RUN cd /tmp && \
 	./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var && \
 	make -j$(nproc) && \
 	make install && \
-	test -f /usr/share/privoxy/templates/forwarding-failed && \
+	test -f /etc/templates/forwarding-failed && \
 	rm -rf /tmp/privoxy-4.2.0-stable /tmp/privoxy_4.2.0.orig.tar.gz
 
 # Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var

@@ -262,11 +262,11 @@ if [ "$tunnel_ok" = true ]; then
 	# confdir/templdir are declared explicitly: Privoxy defaults confdir to the
 	# config file's directory (/tmp), so without these it looks for templates in
 	# /tmp/template and cannot render error pages ("Could not load template file
-	# forwarding-failed"). make install (prefix=/usr) puts them in
-	# /usr/share/privoxy/templates.
+	# forwarding-failed"). make install (sysconfdir=/etc) puts templates in
+	# /etc/templates.
 	cat > /etc/privoxy/config << PROXYEOF
 confdir /etc/privoxy
-templdir /usr/share/privoxy/templates
+templdir /etc/templates
 logdir /var/log/privoxy
 listen-address 127.0.0.1:8118
 listen-address [::1]:8118
@@ -296,8 +296,8 @@ PROXYEOF
 	echo "Privoxy 4.2.0 ready on :8118"
 	# Error pages need the build-time templates; verify so a missing dir fails
 	# loudly here instead of surfacing as an opaque 500 to the agent at runtime.
-	if [ ! -f /usr/share/privoxy/templates/forwarding-failed ]; then
-		echo "WARNING: Privoxy templates missing at /usr/share/privoxy/templates — error pages will 500" >&2
+	if [ ! -f /etc/templates/forwarding-failed ]; then
+		echo "WARNING: Privoxy templates missing at /etc/templates — error pages will 500" >&2
 	fi
 
 	# Set SOCKS5 proxy for curl/git (direct support)
