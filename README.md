@@ -108,9 +108,10 @@ The entrypoint seeds Machine-scope settings (`/config/data/Machine/settings.json
 on every boot so Copilot agent tools run without confirmation prompts or
 "assessed as high-risk" skips in any repo: risk assessment off, global
 auto-approve on, terminal auto-approve for all commands, edits auto-approve.
-It also seeds the storage flags (`chat.tools.global.autoApprove.optIn`,
-`chat.tools.terminal.autoApprove.warningAccepted`) so first-run dialogs never
-appear.
+It also creates `state.vscdb` if missing and seeds the storage flags
+(`chat.tools.global.autoApprove.optIn`,
+`chat.tools.terminal.autoApprove.warningAccepted`) at boot — before the first
+user session starts — so first-run dialogs never appear.
 
 ### MCP server persistence
 

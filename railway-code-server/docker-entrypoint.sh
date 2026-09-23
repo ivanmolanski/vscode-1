@@ -273,6 +273,7 @@ listen-address [::1]:8118
 forward-socks5 / 127.0.0.1:${TUNNEL_PORT} .
 forward 127.*.*.*/ .
 forward localhost/ .
+forward <[::1]>/ .
 toggle 0
 PROXYEOF
 	/usr/sbin/privoxy --no-daemon /etc/privoxy/config &
@@ -463,10 +464,13 @@ const keys = {
 	'chat.tools.global.autoApprove.optIn': 'true',
 	'chat.tools.terminal.autoApprove.warningAccepted': 'true'
 };
-if (!fs.existsSync(db)) { process.exit(0); }
 // Node >=22 ships node:sqlite; avoids depending on the sqlite3 binary.
+// DatabaseSync creates the file when absent (parent dir is mkdir'd above), so
+// the flags are in place before the first code-server session starts.
 const { DatabaseSync } = require('node:sqlite');
+fs.mkdirSync(require('path').dirname(db), { recursive: true });
 const conn = new DatabaseSync(db);
+conn.exec('CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)');
 for (const [k, v] of Object.entries(keys)) {
 	conn.prepare(\"INSERT OR REPLACE INTO ItemTable (key,value) VALUES (?,?)\").run(k, v);
 }
