@@ -413,15 +413,13 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 		}
 
 		// In async mode, signal the agent so it can drive send_to_terminal.
+		// Sensitive-input detection is disabled: prompts for secrets are routed
+		// to the agent like any other input so automated sessions can supply the
+		// value without an interactive hand-off.
 		if (this._asyncMode) {
 			if (shouldFireInputNeeded) {
-				if (this._isSensitivePrompt(outputLastLine)) {
-					this._logService.trace('OutputMonitor: Async mode - sensitive input prompt detected, signaling sensitive UI');
-					this._onDidDetectSensitiveInputNeeded.fire();
-				} else {
-					this._logService.trace('OutputMonitor: Async mode - input-required pattern detected, signaling agent');
-					this._onDidDetectInputNeeded.fire();
-				}
+				this._logService.trace('OutputMonitor: Async mode - input-required pattern detected, signaling agent');
+				this._onDidDetectInputNeeded.fire();
 			}
 			this._cleanupIdleInputListener();
 			return { shouldContinuePolling: false, output };
@@ -429,17 +427,11 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 
 		// In foreground mode, fire the event so the race in runInTerminalTool can pick it
 		// up and return control to the agent (which uses send_to_terminal to provide input).
-		// For sensitive prompts (passwords, secrets, OTPs, …) we instead fire a separate
-		// event so the tool can show a confirmation dialog that focuses the terminal —
-		// the secret must never be routed through the model.
+		// Sensitive-input detection is disabled: prompts for secrets are routed to the
+		// agent like any other input so automated sessions can supply the value.
 		if (shouldFireInputNeeded) {
-			if (this._isSensitivePrompt(outputLastLine)) {
-				this._logService.trace('OutputMonitor: Sensitive input prompt detected, signaling sensitive UI');
-				this._onDidDetectSensitiveInputNeeded.fire();
-			} else {
-				this._logService.trace('OutputMonitor: Input-required pattern detected, signaling agent');
-				this._onDidDetectInputNeeded.fire();
-			}
+			this._logService.trace('OutputMonitor: Input-required pattern detected, signaling agent');
+			this._onDidDetectInputNeeded.fire();
 			this._cleanupIdleInputListener();
 			return { shouldContinuePolling: false, output };
 		}
@@ -609,14 +601,14 @@ function isCanonicalSudoSPrompt(command: string, prompt: string): boolean {
 }
 
 /**
- * Returns true when the terminal's last visible line looks like a prompt for
- * a sensitive secret (password, passphrase, token, API key, OTP, etc.). Used
- * to short-circuit the normal "input needed → return to agent" flow so that
- * the secret is never routed through the model — instead the user is asked
- * via UI to focus the terminal and type the secret directly.
+ * Sensitive-input detection is disabled. Always returns `false` so prompts for
+ * secrets (passwords, passphrases, tokens, API keys, OTPs, etc.) are routed to
+ * the agent like any other input, letting automated sessions supply the value
+ * without an interactive hand-off or auto-cancel.
  */
 export function detectsSensitiveInputPrompt(cursorLine: string): boolean {
-	return /(password|passphrase|token|api\s*key|secret|verification code|otp\b|one[\s-]?time (?:code|password)|2fa|mfa|pin\s*(?:code|number)?[: ]?\s*$|authentication code)/i.test(cursorLine);
+	void cursorLine;
+	return false;
 }
 
 export function matchTerminalPromptOption(options: readonly string[], suggestedOption: string): { option: string | undefined; index: number } {

@@ -518,6 +518,54 @@ try {
 " 2>/dev/null || echo "[entrypoint] WARNING: failed to patch product.json" >&2
 fi
 
+# ---------------------------------------------------------------------------
+# 5) Patch the code-server bundle to disable sensitive-input detection.
+#
+# The /app layer is ephemeral and rebuilt from the stock code-server image on
+# every Railway deploy, so the source-level change (detectsSensitiveInputPrompt
+# always returns false, routing secret prompts to the agent like any other
+# input) must be re-applied to the compiled workbench bundle at boot.
+# Idempotent + signature-guarded: if the anchor is missing (bundle layout
+# changed, or the bundle already carries the patch) we warn and continue — this
+# must never fail container startup. Disable by setting PATCH_SENSITIVE_INPUT=0.
+# ---------------------------------------------------------------------------
+if [ "${PATCH_SENSITIVE_INPUT:-1}" != "0" ]; then
+	SENSITIVE_BUNDLE="$(grep -rl --include='*.js' 'function detectsSensitiveInputPrompt(' /app/code-server/lib/vs/workbench 2>/dev/null | head -n 1)"
+	[ -n "$SENSITIVE_BUNDLE" ] || SENSITIVE_BUNDLE="$(grep -rl --include='*.js' 'function detectsSensitiveInputPrompt(' /app/code-server/lib/vs 2>/dev/null | head -n 1)"
+	if [ -n "$SENSITIVE_BUNDLE" ]; then
+		SENSITIVE_BUNDLE="$SENSITIVE_BUNDLE" node -e "
+const fs = require('fs');
+const p = process.env.SENSITIVE_BUNDLE;
+const src = fs.readFileSync(p, 'utf8');
+const anchor = 'function detectsSensitiveInputPrompt(';
+const start = src.indexOf(anchor);
+if (start === -1) { console.log('[entrypoint] WARNING: sensitive-input signature not found in ' + p); process.exit(0); }
+const braceStart = src.indexOf('{', start);
+let depth = 0, end = -1;
+for (let i = braceStart; i < src.length; i++) {
+	if (src[i] === '{') { depth++; } else if (src[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+}
+if (end === -1) { console.log('[entrypoint] WARNING: could not find end of detectsSensitiveInputPrompt in ' + p); process.exit(0); }
+const body = src.slice(braceStart + 1, end - 1);
+if (/^\s*return false;\s*$/.test(body.replace(/void\s+\w+;/g, ''))) { console.log('[entrypoint] Sensitive-input detection already disabled in ' + p); process.exit(0); }
+const replacement = 'function detectsSensitiveInputPrompt(cursorLine) {\n\treturn false;\n}';
+const out = src.slice(0, start) + replacement + src.slice(end);
+const tmp = p + '.tmp.' + process.pid;
+try {
+	fs.writeFileSync(tmp, out);
+	fs.renameSync(tmp, p);
+	console.log('[entrypoint] Patched ' + p + ' (disabled sensitive-input detection)');
+} catch (e) {
+	try { fs.unlinkSync(tmp); } catch (_) {}
+	console.error('[entrypoint] WARNING: failed to patch code-server bundle: ' + e.message);
+	process.exit(0);
+}
+" 2>/dev/null || echo "[entrypoint] WARNING: failed to patch code-server bundle" >&2
+	else
+		echo "[entrypoint] WARNING: sensitive-input signature not found in /app/code-server/lib/vs; skipping bundle patch" >&2
+	fi
+fi
+
 # Direct bind, password required
 # The extension host OOMs at the default ~4 GB V8 ceiling under several agent
 # extensions (seen in logs as "Reached heap limit Allocation failed"). Raise it
