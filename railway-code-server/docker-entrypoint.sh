@@ -255,6 +255,76 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 	done
 fi
 
+# --- HyperAI internal LLM tunnel (127.0.0.1:18080) ---------------------------
+#
+# VS Code BYOK points "HyperLLM (internal)" at 127.0.0.1:18080, which only
+# means something on THIS container. Without the forward the Copilot extension
+# fails with ECONNREFUSED 127.0.0.1:18080 even though the same model answers
+# fine on http://140.238.139.20:18080 (the VPS reverse tunnel).
+#
+# The SSH port is re-randomised whenever the HyperAI container is recreated, so
+# resolution is HYPERAI_SSH_PORT env -> /config/.hyperai-ssh-port cache, and
+# there is deliberately NO port scan (that reads as an attack to HyperAI's edge
+# and gets this IP throttled). A stale cache means no route, never a wrong one.
+#
+# Set HYPERAI_TUNNEL=0 to skip. The key and cache live on the /config volume, so
+# they survive redeploys; only the ssh process is per-boot.
+HYPERAI_SSH_HOST="${HYPERAI_SSH_HOST:-ssh.hyper.ai}"
+HYPERAI_SSH_USER="${HYPERAI_SSH_USER:-root}"
+HYPERAI_SSH_KEY="${HYPERAI_SSH_KEY:-/config/.ssh/salad_builder}"
+HYPERAI_SSH_PORT_ENV="${HYPERAI_SSH_PORT:-}"
+HYPERAI_PORT_CACHE="${HYPERAI_PORT_CACHE:-/config/.hyperai-ssh-port}"
+HYPERAI_LOCAL_PORT="${HYPERAI_LOCAL_PORT:-18080}"
+
+if [ "${HYPERAI_TUNNEL:-1}" = "1" ] && [ -f "$HYPERAI_SSH_KEY" ]; then
+	hyperai_port=""
+	if [ -n "$HYPERAI_SSH_PORT_ENV" ]; then
+		hyperai_port="$HYPERAI_SSH_PORT_ENV"
+	elif [ -f "$HYPERAI_PORT_CACHE" ]; then
+		hyperai_port="$(tr -dc '0-9' < "$HYPERAI_PORT_CACHE" 2>/dev/null)"
+	fi
+
+	if [ -z "$hyperai_port" ]; then
+		echo "HyperAI tunnel SKIPPED: no port. Set HYPERAI_SSH_PORT or write $HYPERAI_PORT_CACHE." >&2
+	elif ss -tln | grep -q ":${HYPERAI_LOCAL_PORT} "; then
+		echo "HyperAI tunnel already listening on ${HYPERAI_LOCAL_PORT}"
+	else
+		# autossh so a blip (or the HyperAI idle auto-shutdown) heals without
+		# a redeploy. accept-new pins the key on first connect and refuses a
+		# changed one afterwards.
+		nohup autossh -M 0 -f -N \
+			-o StrictHostKeyChecking=accept-new \
+			-o UserKnownHostsFile=/config/.ssh/hyperai_known_hosts \
+			-o ServerAliveInterval=30 \
+			-o ServerAliveCountMax=3 \
+			-o ExitOnForwardFailure=yes \
+			-o ConnectTimeout=10 \
+			-p "$hyperai_port" \
+			-i "$HYPERAI_SSH_KEY" \
+			-L "${HYPERAI_LOCAL_PORT}:127.0.0.1:8080" \
+			-N "${HYPERAI_SSH_USER}@${HYPERAI_SSH_HOST}" \
+			2>>/var/log/hyperai-tunnel.log &
+
+		# Gate on the endpoint actually answering, not on the port being bound:
+		# ssh can bind 18080 and still fail to reach a recreated upstream.
+		hyperai_ok=false
+		for i in $(seq 1 30); do
+			if curl -sSf --noproxy '*' --max-time 4 "http://127.0.0.1:${HYPERAI_LOCAL_PORT}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+				hyperai_ok=true
+				break
+			fi
+			sleep 1
+		done
+		if [ "$hyperai_ok" = true ]; then
+			echo "HyperAI tunnel UP via ${HYPERAI_SSH_HOST}:${hyperai_port} -> 127.0.0.1:${HYPERAI_LOCAL_PORT}"
+		else
+			echo "HyperAI tunnel FAILED on port ${hyperai_port} (see /var/log/hyperai-tunnel.log); BYOK 'internal' will fail until the port is refreshed" >&2
+		fi
+	fi
+else
+	echo "HyperAI tunnel disabled or key missing at ${HYPERAI_SSH_KEY}"
+fi
+
 if [ "$tunnel_ok" = true ]; then
 	# Start privoxy as HTTP→SOCKS5 bridge for Node.js/Copilot
 	# curl/git honor SOCKS5 directly via ALL_PROXY, but Node.js fetch needs HTTP proxy
