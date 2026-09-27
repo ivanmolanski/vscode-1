@@ -1,5 +1,5 @@
 # code-server (VS Code in the browser) on Railway
-# Base: linuxserver/code-server — web GUI on port 8443, state persisted in /config
+# Base: linuxserver/code-servers — web GUI on port 8443, state persisted in /config
 FROM lscr.io/linuxserver/code-server:latest
 
 # ---------------------------------------------------------------------------
