@@ -522,47 +522,93 @@ fi
 # 5) Patch the code-server bundle to disable sensitive-input detection.
 #
 # The /app layer is ephemeral and rebuilt from the stock code-server image on
-# every Railway deploy, so the source-level change (detectsSensitiveInputPrompt
+# every Railway deploy, so the source-level change (sensitive-input detection
 # always returns false, routing secret prompts to the agent like any other
 # input) must be re-applied to the compiled workbench bundle at boot.
-# Idempotent + signature-guarded: if the anchor is missing (bundle layout
-# changed, or the bundle already carries the patch) we warn and continue — this
-# must never fail container startup. Disable by setting PATCH_SENSITIVE_INPUT=0.
+#
+# The stock bundle is minified, so the anchor is the stable class member name
+# `_isSensitivePrompt` (member names survive minification; the stock build has
+# no `detectsSensitiveInputPrompt`). The patcher finds the method definition
+# (an occurrence not preceded by `.`), brace-walks its body, and rewrites the
+# body to `return!1` — that single definition gates every sensitive-input code
+# path (cancel + redaction), so both the async and sync monitor branches fall
+# through to "input required → signal the agent".
+# Idempotent + signature-guarded: if the anchor is missing or already patched
+# we continue — this must never fail container startup. Disable by setting
+# PATCH_SENSITIVE_INPUT=0.
 # ---------------------------------------------------------------------------
 if [ "${PATCH_SENSITIVE_INPUT:-1}" != "0" ]; then
-	SENSITIVE_BUNDLE="$(grep -rl --include='*.js' 'function detectsSensitiveInputPrompt(' /app/code-server/lib/vs/workbench 2>/dev/null | head -n 1)"
-	[ -n "$SENSITIVE_BUNDLE" ] || SENSITIVE_BUNDLE="$(grep -rl --include='*.js' 'function detectsSensitiveInputPrompt(' /app/code-server/lib/vs 2>/dev/null | head -n 1)"
+	SENSITIVE_BUNDLE="$(grep -rl --include='*.js' '_isSensitivePrompt' /app/code-server/lib/vscode 2>/dev/null | head -n 1)"
+	[ -n "$SENSITIVE_BUNDLE" ] || SENSITIVE_BUNDLE="$(grep -rl --include='*.js' '_isSensitivePrompt' /app/code-server/lib/vs 2>/dev/null | head -n 1)"
+	[ -n "$SENSITIVE_BUNDLE" ] || SENSITIVE_BUNDLE="$(grep -rl --include='*.js' '_isSensitivePrompt' /app/code-server/lib 2>/dev/null | head -n 1)"
 	if [ -n "$SENSITIVE_BUNDLE" ]; then
 		SENSITIVE_BUNDLE="$SENSITIVE_BUNDLE" node -e "
 const fs = require('fs');
 const p = process.env.SENSITIVE_BUNDLE;
-const src = fs.readFileSync(p, 'utf8');
-const anchor = 'function detectsSensitiveInputPrompt(';
-const start = src.indexOf(anchor);
-if (start === -1) { console.log('[entrypoint] WARNING: sensitive-input signature not found in ' + p); process.exit(0); }
-const braceStart = src.indexOf('{', start);
-let depth = 0, end = -1;
-for (let i = braceStart; i < src.length; i++) {
-	if (src[i] === '{') { depth++; } else if (src[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+const marker = '_isSensitivePrompt';
+function patchDefinition(src, idx) {
+	const prev = idx > 0 ? src[idx - 1] : '';
+	if (prev === '.') { return null; }
+	let i = idx + marker.length;
+	while (i < src.length && /\s/.test(src[i])) { i++; }
+	if (src[i] === '=') {
+		if (src[i + 1] === '=') { return null; }
+		i++;
+		while (i < src.length && /\s/.test(src[i])) { i++; }
+		if (src.slice(i, i + 8) === 'function') { i += 8; while (i < src.length && /\s/.test(src[i])) { i++; } }
+	}
+	if (src[i] !== '(') { return null; }
+	let depth = 0, j = i;
+	for (; j < src.length; j++) {
+		if (src[j] === '(') { depth++; } else if (src[j] === ')') { depth--; if (depth === 0) { j++; break; } }
+	}
+	if (j >= src.length) { return null; }
+	let k = j;
+	while (k < src.length && /\s/.test(src[k])) { k++; }
+	let bodyOpen = -1;
+	if (src[k] === '{') { bodyOpen = k; } else if (src[k] === '=' && src[k + 1] === '>') {
+		k += 2;
+		while (k < src.length && /\s/.test(src[k])) { k++; }
+		if (src[k] === '{') { bodyOpen = k; }
+	}
+	if (bodyOpen === -1) { return null; }
+	let depth2 = 0, end = -1;
+	for (let q = bodyOpen; q < src.length; q++) {
+		if (src[q] === '{') { depth2++; } else if (src[q] === '}') { depth2--; if (depth2 === 0) { end = q; break; } }
+	}
+	if (end === -1) { return null; }
+	const bodyTrim = src.slice(bodyOpen + 1, end).replace(/;$/, '').trim();
+	if (bodyTrim === 'return!1' || bodyTrim === 'return false') { return null; }
+	return { bodyOpen, end };
 }
-if (end === -1) { console.log('[entrypoint] WARNING: could not find end of detectsSensitiveInputPrompt in ' + p); process.exit(0); }
-const body = src.slice(braceStart + 1, end - 1);
-if (/^\s*return false;\s*$/.test(body.replace(/void\s+\w+;/g, ''))) { console.log('[entrypoint] Sensitive-input detection already disabled in ' + p); process.exit(0); }
-const replacement = 'function detectsSensitiveInputPrompt(cursorLine) {\n\treturn false;\n}';
-const out = src.slice(0, start) + replacement + src.slice(end);
-const tmp = p + '.tmp.' + process.pid;
-try {
-	fs.writeFileSync(tmp, out);
-	fs.renameSync(tmp, p);
-	console.log('[entrypoint] Patched ' + p + ' (disabled sensitive-input detection)');
-} catch (e) {
-	try { fs.unlinkSync(tmp); } catch (_) {}
-	console.error('[entrypoint] WARNING: failed to patch code-server bundle: ' + e.message);
-	process.exit(0);
+const src = fs.readFileSync(p, 'utf8');
+let out = src;
+let patched = 0;
+let searchFrom = 0;
+while (searchFrom < out.length) {
+	const idx = out.indexOf(marker, searchFrom);
+	if (idx === -1) { break; }
+	const r = patchDefinition(out, idx);
+	if (r) { out = out.slice(0, r.bodyOpen + 1) + 'return!1' + out.slice(r.end); patched++; searchFrom = idx + marker.length; }
+	else { const next = out.indexOf(marker, idx + marker.length); searchFrom = next !== -1 ? next : idx + marker.length; }
+}
+if (patched > 0) {
+	const tmp = p + '.tmp.' + process.pid;
+	try {
+		fs.writeFileSync(tmp, out);
+		fs.renameSync(tmp, p);
+		console.log('[entrypoint] Patched ' + p + ' (disabled sensitive-input detection, ' + patched + ' definition(s))');
+	} catch (e) {
+		try { fs.unlinkSync(tmp); } catch (_) {}
+		console.error('[entrypoint] WARNING: failed to patch code-server bundle: ' + e.message);
+		process.exit(0);
+	}
+} else {
+	console.log('[entrypoint] Sensitive-input detection already disabled or absent in ' + p);
 }
 " 2>/dev/null || echo "[entrypoint] WARNING: failed to patch code-server bundle" >&2
 	else
-		echo "[entrypoint] WARNING: sensitive-input signature not found in /app/code-server/lib/vs; skipping bundle patch" >&2
+		echo "[entrypoint] WARNING: sensitive-input signature not found under /app/code-server/lib; skipping bundle patch" >&2
 	fi
 fi
 
