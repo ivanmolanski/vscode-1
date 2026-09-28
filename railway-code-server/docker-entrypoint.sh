@@ -717,6 +717,47 @@ for alt_port in 8443 8080; do
 	fi
 done
 
+# ---------------------------------------------------------------------------
+# Headroom auth repair. Copilot's customendpoint vendor does NOT substitute
+# ${apiKey} inside requestHeaders - it is sent verbatim, so the Headroom
+# gateway saw "Bearer ${apiKey}" and answered 401 for every request. The key
+# itself is correct; only the header template was wrong. Re-apply on every
+# boot so a wiped /config heals too. Skipped when the file is absent so a
+# fresh volume is not created just to hold this.
+# ---------------------------------------------------------------------------
+CHAT_LM_CONFIG="/config/data/User/chatLanguageModels.json"
+if [ -f "$CHAT_LM_CONFIG" ] && command -v python3 >/dev/null 2>&1; then
+	CHAT_LM_KEY="${HEADROOM_API_KEY:-headroom-kali-proxy-2026}"
+	if python3 - "$CHAT_LM_CONFIG" "$CHAT_LM_KEY" <<'PY' >/dev/null 2>&1
+import json, sys
+path, key = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+providers = data if isinstance(data, list) else data.get('languageModels', data.get('providers', []))
+changed = False
+for provider in providers:
+    name = provider.get('name', '')
+    for model in provider.get('models', []):
+        if name == 'HyperLLM (external)':
+            # Gateway enforces the key, so send the literal value.
+            if model.get('requestHeaders') != {'Authorization': f'Bearer {key}'}:
+                model['requestHeaders'] = {'Authorization': f'Bearer {key}'}
+                changed = True
+        elif name == 'HyperLLM (internal)':
+            # Local Headroom ignores auth; the header only added a failure mode.
+            if model.pop('requestHeaders', None) is not None:
+                changed = True
+if changed:
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+PY
+	then
+		echo "[entrypoint] Headroom auth headers verified"
+	else
+		echo "[entrypoint] WARNING: could not verify Headroom auth headers" >&2
+	fi
+fi
+
 echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
 
 # Direct bind, password required
