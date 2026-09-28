@@ -56,11 +56,23 @@ if [ -z "$CS_PASSWORD" ]; then
 	echo "Generated new code-server login password (stored in /config/.code-server-password)"
 fi
 
+# Listen port.
+#
+# code-server applies $PORT AFTER --bind-addr, so an injected PORT silently
+# wins over the flag. Railway injects PORT=8080 at runtime while the image
+# EXPOSEs 8443 - that mismatch is what made the platform healthcheck fail with
+# "service unavailable" even though code-server was up (it was on 8080, the
+# probe went to 8443). So: bind $PORT explicitly (8443 when unset, e.g. plain
+# `docker run`) and relay the other well-known port to it below, so whichever
+# port Railway routes/probes always answers.
+# ---------------------------------------------------------------------------
+CS_PORT="${PORT:-8443}"
+
 # Write the config with auth=password. Update checks stay ENABLED (no
 # disable-update-check) so you are always prompted for newer versions.
 mkdir -p /config/.config/code-server
 cat > /config/.config/code-server/config.yaml <<EOF
-bind-addr: 0.0.0.0:8443
+bind-addr: 0.0.0.0:${CS_PORT}
 auth: password
 password: ${CS_PASSWORD}
 disable-telemetry: true
@@ -286,7 +298,7 @@ if [ "${HYPERAI_TUNNEL:-1}" = "1" ] && [ -f "$HYPERAI_SSH_KEY" ]; then
 
 	if [ -z "$hyperai_port" ]; then
 		echo "HyperAI tunnel SKIPPED: no port. Set HYPERAI_SSH_PORT or write $HYPERAI_PORT_CACHE." >&2
-	elif ss -tln | grep -q ":${HYPERAI_LOCAL_PORT} "; then
+	elif ss -tln | awk -v p="${HYPERAI_LOCAL_PORT}" 'NR > 1 { n = split($4, a, ":"); if (a[n] == p) found = 1 } END { exit found ? 0 : 1 }'; then
 		echo "HyperAI tunnel already listening on ${HYPERAI_LOCAL_PORT}"
 	else
 		# autossh so a blip (or the HyperAI idle auto-shutdown) heals without
@@ -301,7 +313,7 @@ if [ "${HYPERAI_TUNNEL:-1}" = "1" ] && [ -f "$HYPERAI_SSH_KEY" ]; then
 			-o ConnectTimeout=10 \
 			-p "$hyperai_port" \
 			-i "$HYPERAI_SSH_KEY" \
-			-L "${HYPERAI_LOCAL_PORT}:127.0.0.1:8080" \
+			-L "${HYPERAI_LOCAL_PORT}:127.0.0.1:8787" \
 			-N "${HYPERAI_SSH_USER}@${HYPERAI_SSH_HOST}" \
 			2>>/var/log/hyperai-tunnel.log &
 
@@ -309,7 +321,7 @@ if [ "${HYPERAI_TUNNEL:-1}" = "1" ] && [ -f "$HYPERAI_SSH_KEY" ]; then
 		# ssh can bind 18080 and still fail to reach a recreated upstream.
 		hyperai_ok=false
 		for i in $(seq 1 30); do
-			if curl -sSf --noproxy '*' --max-time 4 "http://127.0.0.1:${HYPERAI_LOCAL_PORT}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+			if curl -sSf --noproxy '*' --max-time 4 "http://127.0.0.1:${HYPERAI_LOCAL_PORT}/health" 2>/dev/null | jq -e '(.status == "ok" or .status == "healthy")' >/dev/null 2>&1; then
 				hyperai_ok=true
 				break
 			fi
@@ -682,13 +694,38 @@ if (patched > 0) {
 	fi
 fi
 
+# ---------------------------------------------------------------------------
+# Port relay: forward every other well-known port to the port code-server is
+# actually bound to, so Railway's router/healthcheck reaches it no matter which
+# port it picks (EXPOSE 8443 vs injected PORT=8080). Plain TCP forwarding, so
+# WebSockets (terminals, remote extension host) pass through untouched.
+# ipv6only=0 makes the listener serve IPv4 and IPv6 alike. Best effort: a
+# failing relay never blocks startup.
+# ---------------------------------------------------------------------------
+for alt_port in 8443 8080; do
+	[ "$alt_port" = "$CS_PORT" ] && continue
+	if ss -tln | grep -q ":${alt_port} "; then
+		echo "[entrypoint] Port ${alt_port} already in use - skipping relay" >&2
+		continue
+	fi
+	if command -v socat >/dev/null 2>&1; then
+		socat "TCP6-LISTEN:${alt_port},fork,reuseaddr,ipv6only=0" \
+			"TCP:127.0.0.1:${CS_PORT}" >/dev/null 2>&1 &
+		echo "[entrypoint] Relaying :${alt_port} -> :${CS_PORT}"
+	else
+		echo "[entrypoint] WARNING: socat missing - no relay for :${alt_port}" >&2
+	fi
+done
+
+echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
+
 # Direct bind, password required
 # The extension host OOMs at the default ~4 GB V8 ceiling under several agent
 # extensions (seen in logs as "Reached heap limit Allocation failed"). Raise it
 # for the whole process tree; override with NODE_OPTIONS if the plan is smaller.
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=6144}"
 exec /app/code-server/bin/code-server \
-	--bind-addr "[::]:8443" \
+	--bind-addr "[::]:${CS_PORT}" \
 	--config /config/.config/code-server/config.yaml \
 	--user-data-dir /config/data \
 	--extensions-dir /config/extensions \

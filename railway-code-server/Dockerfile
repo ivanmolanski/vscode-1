@@ -33,6 +33,7 @@ RUN apt-get update && \
 	python3-full \
 	pipx \
 	jq \
+	socat \
 	less \
 	htop \
 	nano \
