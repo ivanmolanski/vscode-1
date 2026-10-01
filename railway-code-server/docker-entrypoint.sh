@@ -440,6 +440,23 @@ for alt_port in 8443 8080; do
 	fi
 done
 
+# ---------------------------------------------------------------------------
+# PATH-2 Headroom Copilot proxy (self-healing, no cron).
+#
+# Runs headroom-bootstrap.sh: refreshes the operator scripts onto the persistent
+# /config volume, ensures the headroom venv + pinned package exist, and starts
+# the flock-deduped watchdog that launches the proxy if it is down and keeps it
+# alive. MUST NEVER block or abort the code-server launch — any failure is a
+# non-fatal warning. (copilot_auth.json, the venv, and watchdog state all
+# persist on /config, so a redeploy only needs to re-run this once to restore
+# the running proxy. Effect: native Copilot -> 127.0.0.1:8787 -> HyperAI 5090.)
+# ---------------------------------------------------------------------------
+if [ -f /usr/local/lib/headroom/headroom-bootstrap.sh ]; then
+	echo "[entrypoint] Starting Headroom Copilot proxy (PATH-2, :8787)..."
+	bash /usr/local/lib/headroom/headroom-bootstrap.sh \
+		|| echo "[entrypoint] WARNING: headroom bootstrap failed (non-fatal); code-server starting anyway" >&2
+fi
+
 echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
 
 # Direct bind, password required

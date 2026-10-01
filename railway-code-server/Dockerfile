@@ -196,6 +196,13 @@ RUN mkdir -p /etc/profile.d /root/.config /home/abc/.config && \
 # ---------------------------------------------------------------------------
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
+# PATH-2 Headroom Copilot proxy operator scripts. On boot, docker-entrypoint.sh
+# copies these onto the persistent /config volume and runs headroom-bootstrap.sh
+# to ensure the headroom venv + self-heal watchdog are running (native Copilot
+# -> Headroom :8787 -> HyperAI 5090). See scripts/headroom-bootstrap.sh.
+COPY --chmod=755 scripts/headroom-proxy.sh /usr/local/lib/headroom/headroom-proxy.sh
+COPY --chmod=755 scripts/headroom-watchdog.sh /usr/local/lib/headroom/headroom-watchdog.sh
+COPY --chmod=755 scripts/headroom-bootstrap.sh /usr/local/lib/headroom/headroom-bootstrap.sh
 
 # ---------------------------------------------------------------------------
 # AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443).
