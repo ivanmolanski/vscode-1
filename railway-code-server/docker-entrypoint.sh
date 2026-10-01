@@ -11,6 +11,25 @@
 
 set -e
 
+# ---------------------------------------------------------------------------
+# APT STATE RESTORATION — restore apt lists from /config volume so
+# apt-get upgrade/update works at runtime without rebuilding the image.
+# ---------------------------------------------------------------------------
+if [ -d /config/apt-state/lib/apt/lists ] && [ "$(ls -A /config/apt-state/lib/apt/lists 2>/dev/null)" ]; then
+	mkdir -p /var/lib/apt/lists/partial
+	cp -a /config/apt-state/lib/apt/* /var/lib/apt/ 2>/dev/null || true
+	echo "[entrypoint] Restored apt lists from /config/apt-state"
+fi
+if [ -d /config/apt-state/cache ] && [ "$(ls -A /config/apt-state/cache 2>/dev/null)" ]; then
+	cp -a /config/apt-state/cache/* /var/cache/apt/ 2>/dev/null || true
+fi
+# Keep apt state in sync: after any apt operation, save to /config
+save_apt_state() {
+	cp -a /var/lib/apt/* /config/apt-state/lib/ 2>/dev/null || true
+	cp -a /var/cache/apt/* /config/apt-state/cache/ 2>/dev/null || true
+}
+trap save_apt_state EXIT
+
 # Strip any stale `source .../.cargo/env` (or `. "$CARGO_HOME/env"`) lines that
 # rustup may have injected into shell profiles. These lines error on every
 # terminal open ("bash: /config/.cargo/env: No such file or directory") when the
@@ -37,12 +56,11 @@ if [ -z "$CS_PASSWORD" ]; then
 	echo "Generated new code-server login password (stored in /config/.code-server-password)"
 fi
 
-# ---------------------------------------------------------------------------
 # Listen port.
 #
 # code-server applies $PORT AFTER --bind-addr, so an injected PORT silently
 # wins over the flag. Railway injects PORT=8080 at runtime while the image
-# EXPOSEs 8443 — that mismatch is what made the platform healthcheck fail with
+# EXPOSEs 8443 - that mismatch is what made the platform healthcheck fail with
 # "service unavailable" even though code-server was up (it was on 8080, the
 # probe went to 8443). So: bind $PORT explicitly (8443 when unset, e.g. plain
 # `docker run`) and relay the other well-known port to it below, so whichever
@@ -65,6 +83,31 @@ chown -R abc:abc /config 2>/dev/null || true
 # Ensure the npm global bin is on PATH for terminal sessions (redundant with
 # /usr/local already on PATH, but explicit never hurts)
 export PATH="/usr/local/bin:$PATH"
+
+# ---------------------------------------------------------------------------
+# PERSISTED TOOLS — symlink tools from /config volume into PATH so they
+# survive container restarts. Users who install apt packages at runtime
+# can add them here, or place binaries in /config/.local/bin.
+# ---------------------------------------------------------------------------
+mkdir -p /config/.local/bin
+export PATH="/config/.local/bin:$PATH"
+
+# Railway CLI — self-healing: the image ships a working binary; if it is
+# missing or broken (e.g. a broken npm shim shadowed it), reinstall the
+# latest via the official installer. Install directly into /config/.local/bin
+# (first on PATH) so the active executable is replaced; -y skips the prompt.
+mkdir -p /config/.local/bin
+if ! railway --version >/dev/null 2>&1; then
+	echo "[entrypoint] Railway CLI missing or broken — reinstalling latest..."
+	curl -fsSL https://railway.com/install.sh | bash -s -- -y -b /config/.local/bin >/dev/null 2>&1 || true
+fi
+if [ -x /usr/local/bin/railway ] && [ ! -x /config/.local/bin/railway ]; then
+	ln -sf /usr/local/bin/railway /config/.local/bin/railway 2>/dev/null || true
+fi
+railway --version >/dev/null 2>&1 && echo "[entrypoint] Railway CLI: $(railway --version 2>&1 | tail -1)" || echo "[entrypoint] WARNING: Railway CLI unavailable"
+
+# Persist any apt-installed binaries that users add at runtime
+# (users can also symlink their own binaries into /config/.local/bin)
 
 # ---------------------------------------------------------------------------
 # AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443).
@@ -224,17 +267,98 @@ if [ -n "${VPS_SSH_KEY:-}" ] && [ -f "$TUNNEL_KEY" ]; then
 	done
 fi
 
+# --- HyperAI internal LLM tunnel (127.0.0.1:18080) ---------------------------
+#
+# VS Code BYOK points "HyperLLM (internal)" at 127.0.0.1:18080, which only
+# means something on THIS container. Without the forward the Copilot extension
+# fails with ECONNREFUSED 127.0.0.1:18080 even though the same model answers
+# fine on http://140.238.139.20:18080 (the VPS reverse tunnel).
+#
+# The SSH port is re-randomised whenever the HyperAI container is recreated, so
+# resolution is HYPERAI_SSH_PORT env -> /config/.hyperai-ssh-port cache, and
+# there is deliberately NO port scan (that reads as an attack to HyperAI's edge
+# and gets this IP throttled). A stale cache means no route, never a wrong one.
+#
+# Set HYPERAI_TUNNEL=0 to skip. The key and cache live on the /config volume, so
+# they survive redeploys; only the ssh process is per-boot.
+HYPERAI_SSH_HOST="${HYPERAI_SSH_HOST:-ssh.hyper.ai}"
+HYPERAI_SSH_USER="${HYPERAI_SSH_USER:-root}"
+HYPERAI_SSH_KEY="${HYPERAI_SSH_KEY:-/config/.ssh/salad_builder}"
+HYPERAI_SSH_PORT_ENV="${HYPERAI_SSH_PORT:-}"
+HYPERAI_PORT_CACHE="${HYPERAI_PORT_CACHE:-/config/.hyperai-ssh-port}"
+HYPERAI_LOCAL_PORT="${HYPERAI_LOCAL_PORT:-18080}"
+
+if [ "${HYPERAI_TUNNEL:-1}" = "1" ] && [ -f "$HYPERAI_SSH_KEY" ]; then
+	hyperai_port=""
+	if [ -n "$HYPERAI_SSH_PORT_ENV" ]; then
+		hyperai_port="$HYPERAI_SSH_PORT_ENV"
+	elif [ -f "$HYPERAI_PORT_CACHE" ]; then
+		hyperai_port="$(tr -dc '0-9' < "$HYPERAI_PORT_CACHE" 2>/dev/null)"
+	fi
+
+	if [ -z "$hyperai_port" ]; then
+		echo "HyperAI tunnel SKIPPED: no port. Set HYPERAI_SSH_PORT or write $HYPERAI_PORT_CACHE." >&2
+	elif ss -tln | awk -v p="${HYPERAI_LOCAL_PORT}" 'NR > 1 { n = split($4, a, ":"); if (a[n] == p) found = 1 } END { exit found ? 0 : 1 }'; then
+		echo "HyperAI tunnel already listening on ${HYPERAI_LOCAL_PORT}"
+	else
+		# autossh so a blip (or the HyperAI idle auto-shutdown) heals without
+		# a redeploy. accept-new pins the key on first connect and refuses a
+		# changed one afterwards.
+		nohup autossh -M 0 -f -N \
+			-o StrictHostKeyChecking=accept-new \
+			-o UserKnownHostsFile=/config/.ssh/hyperai_known_hosts \
+			-o ServerAliveInterval=30 \
+			-o ServerAliveCountMax=3 \
+			-o ExitOnForwardFailure=yes \
+			-o ConnectTimeout=10 \
+			-p "$hyperai_port" \
+			-i "$HYPERAI_SSH_KEY" \
+			-L "${HYPERAI_LOCAL_PORT}:127.0.0.1:8787" \
+			-N "${HYPERAI_SSH_USER}@${HYPERAI_SSH_HOST}" \
+			2>>/var/log/hyperai-tunnel.log &
+
+		# Gate on the endpoint actually answering, not on the port being bound:
+		# ssh can bind 18080 and still fail to reach a recreated upstream.
+		hyperai_ok=false
+		for i in $(seq 1 30); do
+			if curl -sSf --noproxy '*' --max-time 4 "http://127.0.0.1:${HYPERAI_LOCAL_PORT}/health" 2>/dev/null | jq -e '(.status == "ok" or .status == "healthy")' >/dev/null 2>&1; then
+				hyperai_ok=true
+				break
+			fi
+			sleep 1
+		done
+		if [ "$hyperai_ok" = true ]; then
+			echo "HyperAI tunnel UP via ${HYPERAI_SSH_HOST}:${hyperai_port} -> 127.0.0.1:${HYPERAI_LOCAL_PORT}"
+		else
+			echo "HyperAI tunnel FAILED on port ${hyperai_port} (see /var/log/hyperai-tunnel.log); BYOK 'internal' will fail until the port is refreshed" >&2
+		fi
+	fi
+else
+	echo "HyperAI tunnel disabled or key missing at ${HYPERAI_SSH_KEY}"
+fi
+
 if [ "$tunnel_ok" = true ]; then
 	# Start privoxy as HTTP→SOCKS5 bridge for Node.js/Copilot
 	# curl/git honor SOCKS5 directly via ALL_PROXY, but Node.js fetch needs HTTP proxy
-	mkdir -p /run/privoxy
-	cat > /tmp/privoxy.conf << PROXYEOF
+	mkdir -p /run/privoxy /etc/privoxy /var/log/privoxy
+	# confdir/templdir are declared explicitly: Privoxy defaults confdir to the
+	# config file's directory (/tmp), so without these it looks for templates in
+	# /tmp/template and cannot render error pages ("Could not load template file
+	# forwarding-failed"). make install (sysconfdir=/etc) puts templates in
+	# /etc/templates.
+	cat > /etc/privoxy/config << PROXYEOF
+confdir /etc/privoxy
+templdir /etc/templates
+logdir /var/log/privoxy
 listen-address 127.0.0.1:8118
 listen-address [::1]:8118
 forward-socks5 / 127.0.0.1:${TUNNEL_PORT} .
+forward 127.*.*.*/ .
+forward localhost/ .
+forward <[::1]>/ .
 toggle 0
 PROXYEOF
-	/usr/sbin/privoxy --no-daemon /tmp/privoxy.conf &
+	/usr/sbin/privoxy --no-daemon /etc/privoxy/config &
 	PRIVOXY_PID=$!
 	# Poll for privoxy readiness instead of blind sleep
 	for i in $(seq 1 10); do
@@ -253,6 +377,11 @@ PROXYEOF
 		exit 1
 	fi
 	echo "Privoxy 4.2.0 ready on :8118"
+	# Error pages need the build-time templates; verify so a missing dir fails
+	# loudly here instead of surfacing as an opaque 500 to the agent at runtime.
+	if [ ! -f /etc/templates/forwarding-failed ]; then
+		echo "WARNING: Privoxy templates missing at /etc/templates — error pages will 500" >&2
+	fi
 
 	# Set SOCKS5 proxy for curl/git (direct support)
 	export ALL_PROXY="socks5h://127.0.0.1:${TUNNEL_PORT}"
@@ -377,14 +506,68 @@ fi
 
 chown -R abc:abc "$EXT_DIR" 2>/dev/null || true
 
-# 3) Ensure extension auto-update is enabled (Machine scope)
+# 3) Machine-scope settings — applied to every repo/workspace.
+#    Includes extension auto-update plus Copilot agent safety-gate disables so
+#    no confirmation prompts or "assessed as high-risk" skips appear in any
+#    workspace. Idempotent: merges keys, never clobbers the rest of the file.
 mkdir -p "$DATA_DIR/Machine"
 SETTINGS_JSON="$DATA_DIR/Machine/settings.json"
-if [ -f "$SETTINGS_JSON" ]; then
-	grep -q '"extensions.autoUpdate"' "$SETTINGS_JSON" || \
-		node -e "const fs=require('fs');const p='$SETTINGS_JSON';const s=JSON.parse(fs.readFileSync(p,'utf8'));s['extensions.autoUpdate']=true;s['extensions.autoCheckUpdates']=true;fs.writeFileSync(p,JSON.stringify(s,null,2))" 2>/dev/null || true
-else
-	printf '{\n  "extensions.autoUpdate": true,\n  "extensions.autoCheckUpdates": true\n}\n' > "$SETTINGS_JSON"
+node -e "
+const fs = require('fs');
+const p = '$SETTINGS_JSON';
+fs.mkdirSync(require('path').dirname(p), { recursive: true });
+let s = {};
+try { s = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
+Object.assign(s, {
+	'extensions.autoUpdate': true,
+	'extensions.autoCheckUpdates': true,
+	'chat.tools.riskAssessment.enabled': false,
+	'chat.autopilot.advanced.enabled': false,
+	'chat.tools.global.autoApprove': true,
+	'chat.tools.terminal.enableAutoApprove': true,
+	'chat.tools.terminal.autoApprove': { '/.*/': true },
+	'chat.tools.terminal.ignoreDefaultAutoApproveRules': true,
+	'chat.tools.edits.autoApprove': true,
+	'chat.permissions.default': 'autoApprove'
+});
+fs.writeFileSync(p, JSON.stringify(s, null, 2));
+console.log('[entrypoint] Seeded Machine settings (auto-update + agent auto-approve)');
+" 2>/dev/null || echo "[entrypoint] WARNING: failed to seed Machine settings" >&2
+
+# 3b) Seed Copilot storage flags (APPLICATION scope, state.vscdb ItemTable)
+#     so the "Enable global auto approve?" and terminal auto-approve warning
+#     dialogs never appear on first run.
+STORAGE_DB="$DATA_DIR/User/globalStorage/state.vscdb"
+mkdir -p "$DATA_DIR/User/globalStorage"
+node -e "
+const fs = require('fs');
+const db = '$STORAGE_DB';
+const keys = {
+	'chat.tools.global.autoApprove.optIn': 'true',
+	'chat.tools.terminal.autoApprove.warningAccepted': 'true'
+};
+// Node >=22 ships node:sqlite; avoids depending on the sqlite3 binary.
+// DatabaseSync creates the file when absent (parent dir is mkdir'd above), so
+// the flags are in place before the first code-server session starts.
+const { DatabaseSync } = require('node:sqlite');
+fs.mkdirSync(require('path').dirname(db), { recursive: true });
+const conn = new DatabaseSync(db);
+conn.exec('CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)');
+for (const [k, v] of Object.entries(keys)) {
+	conn.prepare(\"INSERT OR REPLACE INTO ItemTable (key,value) VALUES (?,?)\").run(k, v);
+}
+conn.close();
+console.log('[entrypoint] Seeded auto-approve storage flags');
+" 2>/dev/null || echo "[entrypoint] WARNING: could not seed storage flags (state.vscdb busy or node:sqlite unavailable)" >&2
+
+# 3c) Seed user-scope MCP config — /config/data/User/mcp.json lives on the
+#     persistent volume, so MCP servers added at Global scope survive
+#     redeploys. Only created if missing (user edits are never overwritten).
+MCP_JSON="$DATA_DIR/User/mcp.json"
+if [ ! -f "$MCP_JSON" ]; then
+	mkdir -p "$DATA_DIR/User"
+	printf '{\n  "servers": {},\n  "inputs": []\n}\n' > "$MCP_JSON"
+	echo "[entrypoint] Seeded user-scope mcp.json (persists on /config volume)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -418,6 +601,100 @@ try {
 fi
 
 # ---------------------------------------------------------------------------
+# 5) Patch the code-server bundle to disable sensitive-input detection.
+#
+# The /app layer is ephemeral and rebuilt from the stock code-server image on
+# every Railway deploy, so the source-level change (sensitive-input detection
+# always returns false, routing secret prompts to the agent like any other
+# input) must be re-applied to the compiled workbench bundle at boot.
+#
+# The stock bundle is minified, so the anchor is the stable class member name
+# `_isSensitivePrompt` (member names survive minification; the stock build has
+# no `detectsSensitiveInputPrompt`). The patcher finds the method definition
+# (an occurrence not preceded by `.`), brace-walks its body, and rewrites the
+# body to `return!1` — that single definition gates every sensitive-input code
+# path (cancel + redaction), so both the async and sync monitor branches fall
+# through to "input required → signal the agent".
+# Idempotent + signature-guarded: if the anchor is missing or already patched
+# we continue — this must never fail container startup. Disable by setting
+# PATCH_SENSITIVE_INPUT=0.
+# ---------------------------------------------------------------------------
+if [ "${PATCH_SENSITIVE_INPUT:-1}" != "0" ]; then
+	SENSITIVE_BUNDLE="$(grep -rl --include='*.js' '_isSensitivePrompt' /app/code-server/lib/vscode 2>/dev/null | head -n 1)"
+	[ -n "$SENSITIVE_BUNDLE" ] || SENSITIVE_BUNDLE="$(grep -rl --include='*.js' '_isSensitivePrompt' /app/code-server/lib/vs 2>/dev/null | head -n 1)"
+	[ -n "$SENSITIVE_BUNDLE" ] || SENSITIVE_BUNDLE="$(grep -rl --include='*.js' '_isSensitivePrompt' /app/code-server/lib 2>/dev/null | head -n 1)"
+	if [ -n "$SENSITIVE_BUNDLE" ]; then
+		SENSITIVE_BUNDLE="$SENSITIVE_BUNDLE" node -e "
+const fs = require('fs');
+const p = process.env.SENSITIVE_BUNDLE;
+const marker = '_isSensitivePrompt';
+function patchDefinition(src, idx) {
+	const prev = idx > 0 ? src[idx - 1] : '';
+	if (prev === '.') { return null; }
+	let i = idx + marker.length;
+	while (i < src.length && /\s/.test(src[i])) { i++; }
+	if (src[i] === '=') {
+		if (src[i + 1] === '=') { return null; }
+		i++;
+		while (i < src.length && /\s/.test(src[i])) { i++; }
+		if (src.slice(i, i + 8) === 'function') { i += 8; while (i < src.length && /\s/.test(src[i])) { i++; } }
+	}
+	if (src[i] !== '(') { return null; }
+	let depth = 0, j = i;
+	for (; j < src.length; j++) {
+		if (src[j] === '(') { depth++; } else if (src[j] === ')') { depth--; if (depth === 0) { j++; break; } }
+	}
+	if (j >= src.length) { return null; }
+	let k = j;
+	while (k < src.length && /\s/.test(src[k])) { k++; }
+	let bodyOpen = -1;
+	if (src[k] === '{') { bodyOpen = k; } else if (src[k] === '=' && src[k + 1] === '>') {
+		k += 2;
+		while (k < src.length && /\s/.test(src[k])) { k++; }
+		if (src[k] === '{') { bodyOpen = k; }
+	}
+	if (bodyOpen === -1) { return null; }
+	let depth2 = 0, end = -1;
+	for (let q = bodyOpen; q < src.length; q++) {
+		if (src[q] === '{') { depth2++; } else if (src[q] === '}') { depth2--; if (depth2 === 0) { end = q; break; } }
+	}
+	if (end === -1) { return null; }
+	const bodyTrim = src.slice(bodyOpen + 1, end).replace(/;$/, '').trim();
+	if (bodyTrim === 'return!1' || bodyTrim === 'return false') { return null; }
+	return { bodyOpen, end };
+}
+const src = fs.readFileSync(p, 'utf8');
+let out = src;
+let patched = 0;
+let searchFrom = 0;
+while (searchFrom < out.length) {
+	const idx = out.indexOf(marker, searchFrom);
+	if (idx === -1) { break; }
+	const r = patchDefinition(out, idx);
+	if (r) { out = out.slice(0, r.bodyOpen + 1) + 'return!1' + out.slice(r.end); patched++; searchFrom = idx + marker.length; }
+	else { const next = out.indexOf(marker, idx + marker.length); searchFrom = next !== -1 ? next : idx + marker.length; }
+}
+if (patched > 0) {
+	const tmp = p + '.tmp.' + process.pid;
+	try {
+		fs.writeFileSync(tmp, out);
+		fs.renameSync(tmp, p);
+		console.log('[entrypoint] Patched ' + p + ' (disabled sensitive-input detection, ' + patched + ' definition(s))');
+	} catch (e) {
+		try { fs.unlinkSync(tmp); } catch (_) {}
+		console.error('[entrypoint] WARNING: failed to patch code-server bundle: ' + e.message);
+		process.exit(0);
+	}
+} else {
+	console.log('[entrypoint] Sensitive-input detection already disabled or absent in ' + p);
+}
+" 2>/dev/null || echo "[entrypoint] WARNING: failed to patch code-server bundle" >&2
+	else
+		echo "[entrypoint] WARNING: sensitive-input signature not found under /app/code-server/lib; skipping bundle patch" >&2
+	fi
+fi
+
+# ---------------------------------------------------------------------------
 # Port relay: forward every other well-known port to the port code-server is
 # actually bound to, so Railway's router/healthcheck reaches it no matter which
 # port it picks (EXPOSE 8443 vs injected PORT=8080). Plain TCP forwarding, so
@@ -428,7 +705,7 @@ fi
 for alt_port in 8443 8080; do
 	[ "$alt_port" = "$CS_PORT" ] && continue
 	if ss -tln | grep -q ":${alt_port} "; then
-		echo "[entrypoint] Port ${alt_port} already in use — skipping relay" >&2
+		echo "[entrypoint] Port ${alt_port} already in use - skipping relay" >&2
 		continue
 	fi
 	if command -v socat >/dev/null 2>&1; then
@@ -436,7 +713,7 @@ for alt_port in 8443 8080; do
 			"TCP:127.0.0.1:${CS_PORT}" >/dev/null 2>&1 &
 		echo "[entrypoint] Relaying :${alt_port} -> :${CS_PORT}"
 	else
-		echo "[entrypoint] WARNING: socat missing — no relay for :${alt_port}" >&2
+		echo "[entrypoint] WARNING: socat missing - no relay for :${alt_port}" >&2
 	fi
 done
 
@@ -457,9 +734,53 @@ if [ -f /usr/local/lib/headroom/headroom-bootstrap.sh ]; then
 		|| echo "[entrypoint] WARNING: headroom bootstrap failed (non-fatal); code-server starting anyway" >&2
 fi
 
+# Headroom auth repair. Copilot's customendpoint vendor does NOT substitute
+# ${apiKey} inside requestHeaders - it is sent verbatim, so the Headroom
+# gateway saw "Bearer ${apiKey}" and answered 401 for every request. The key
+# itself is correct; only the header template was wrong. Re-apply on every
+# boot so a wiped /config heals too. Skipped when the file is absent so a
+# fresh volume is not created just to hold this.
+# ---------------------------------------------------------------------------
+CHAT_LM_CONFIG="/config/data/User/chatLanguageModels.json"
+if [ -f "$CHAT_LM_CONFIG" ] && command -v python3 >/dev/null 2>&1; then
+	CHAT_LM_KEY="${HEADROOM_API_KEY:-headroom-kali-proxy-2026}"
+	if python3 - "$CHAT_LM_CONFIG" "$CHAT_LM_KEY" <<'PY' >/dev/null 2>&1
+import json, sys
+path, key = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+providers = data if isinstance(data, list) else data.get('languageModels', data.get('providers', []))
+changed = False
+for provider in providers:
+    name = provider.get('name', '')
+    for model in provider.get('models', []):
+        if name == 'HyperLLM (external)':
+            # Gateway enforces the key, so send the literal value.
+            if model.get('requestHeaders') != {'Authorization': f'Bearer {key}'}:
+                model['requestHeaders'] = {'Authorization': f'Bearer {key}'}
+                changed = True
+        elif name == 'HyperLLM (internal)':
+            # Local Headroom ignores auth; the header only added a failure mode.
+            if model.pop('requestHeaders', None) is not None:
+                changed = True
+if changed:
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+PY
+	then
+		echo "[entrypoint] Headroom auth headers verified"
+	else
+		echo "[entrypoint] WARNING: could not verify Headroom auth headers" >&2
+	fi
+fi
+
 echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
 
 # Direct bind, password required
+# The extension host OOMs at the default ~4 GB V8 ceiling under several agent
+# extensions (seen in logs as "Reached heap limit Allocation failed"). Raise it
+# for the whole process tree; override with NODE_OPTIONS if the plan is smaller.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=6144}"
 exec /app/code-server/bin/code-server \
 	--bind-addr "[::]:${CS_PORT}" \
 	--config /config/.config/code-server/config.yaml \

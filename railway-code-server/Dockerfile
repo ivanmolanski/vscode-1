@@ -1,6 +1,17 @@
 # code-server (VS Code in the browser) on Railway
-# Base: linuxserver/code-server — web GUI on port 8443, state persisted in /config
+# Base: linuxserver/code-servers — web GUI on port 8443, state persisted in /config
 FROM lscr.io/linuxserver/code-server:latest
+
+# ---------------------------------------------------------------------------
+# APT PERSISTENCE — keep lists so apt-get upgrade works at runtime.
+# The /config volume persists across restarts; we back up apt state there
+# and restore it on container start.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /config/apt-state && \
+	cp -a /var/cache/apt /config/apt-state/cache 2>/dev/null || true && \
+	cp -a /var/lib/apt /config/apt-state/lib 2>/dev/null || true && \
+	cp -a /etc/apt/sources.list /config/apt-state/sources.list 2>/dev/null || true && \
+	cp -a /etc/apt/sources.list.d /config/apt-state/sources.list.d 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Developer toolchains & default packages (kept in the image, not in the volume)
@@ -22,6 +33,7 @@ RUN apt-get update && \
 	python3-full \
 	pipx \
 	jq \
+	socat \
 	less \
 	htop \
 	nano \
@@ -53,10 +65,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/*
 
+# Railway CLI — installed at build time so it persists in the image.
+# Use the official installer (single static binary) instead of npm: the npm
+# package relies on a postinstall download that can silently fail and leave a
+# broken shim ("could not find the CLI binary"). -y skips the confirmation
+# prompt; --bin-dir puts the binary in /usr/local/bin (already on PATH).
+RUN curl -fsSL https://railway.com/install.sh | bash -s -- -y -b /usr/local/bin && \
+	railway --version
+
 # npm global installs live in /usr/local (already on PATH automatically,
 # just like npm --prefix on a local machine). With PUID=0 at runtime the
 # user is root and can write anywhere, so no permission gymnastics needed.
-# Cache goes to /tmp since it's ephemeral and doesn't need persistence.
 ENV NPM_CONFIG_PREFIX=/usr/local \
 	NPM_CONFIG_CACHE=/tmp/.npm-cache
 # Ensure /usr/local/bin is on PATH for every process (not only login shells)
@@ -225,6 +244,9 @@ RUN apt-get update && \
 	&& rm -rf /var/lib/apt/lists/*
 
 # Build privoxy 4.2.0 from source (Ubuntu only ships 3.x)
+# With --sysconfdir=/etc, make install puts templates in /etc/templates and
+# config files in /etc; the entrypoint points templdir there so error pages
+# render even though the running config lives in /etc/privoxy.
 RUN cd /tmp && \
 	wget -q http://deb.debian.org/debian/pool/main/p/privoxy/privoxy_4.2.0.orig.tar.gz && \
 	tar xzf privoxy_4.2.0.orig.tar.gz && \
@@ -233,6 +255,7 @@ RUN cd /tmp && \
 	./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var && \
 	make -j$(nproc) && \
 	make install && \
+	test -f /etc/templates/forwarding-failed && \
 	rm -rf /tmp/privoxy-4.2.0-stable /tmp/privoxy_4.2.0.orig.tar.gz
 
 # Tunnel SSH key is provided at runtime via VPS_SSH_KEY env var

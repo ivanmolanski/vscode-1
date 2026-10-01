@@ -66,6 +66,64 @@ This repository includes a Visual Studio Code Dev Containers / GitHub Codespaces
 
 Docker / the Codespace should have at least **4 cores and 6 GB of RAM (8 GB recommended)** to run a full build. See the [development container README](.devcontainer/README.md) for more information.
 
+## Railway Code Server Architecture
+
+This repository includes a Railway deployment for running VS Code (code-server) in the browser with full persistence.
+
+### Persistence Architecture
+
+The `/config` volume persists across container restarts. The following items survive restarts:
+
+| What | Where | Survives Restart |
+|------|-------|------------------|
+| Railway CLI | Image (`/usr/local/bin/railway`) + symlink in `/config/.local/bin` | ✅ Yes (self-healing: reinstalls latest if broken) |
+| APT cache/lists | `/config/apt-state/` | ✅ Yes (restored on start) |
+| Extensions | `/config/extensions/` | ✅ Yes (volume) |
+| User data | `/config/data/` | ✅ Yes (volume) |
+| Copilot agent settings | `/config/data/Machine/settings.json` | ✅ Yes (seeded every boot, applies to all repos) |
+| MCP servers (Global scope) | `/config/data/User/mcp.json` | ✅ Yes (volume — add servers at Global scope, not per-repo) |
+| Workspace | `/config/workspace/` | ✅ Yes (volume) |
+| SSH keys | `/config/.ssh/` | ✅ Yes (volume) |
+| Code-server password | `/config/.code-server-password` | ✅ Yes (volume) |
+| Persisted tools | `/config/.local/bin/` | ✅ Yes (volume) |
+
+### Running apt-get upgrade
+
+The entrypoint automatically restores APT state from `/config/apt-state/` on startup. You can run `apt-get update && apt-get upgrade` in the terminal and the changes persist across restarts.
+
+### Adding persistent tools
+
+Place binaries in `/config/.local/bin/` which is on PATH:
+
+```bash
+# Example: install a tool and persist it
+sudo cp /usr/bin/mytool /config/.local/bin/
+# Or symlink
+ln -s /path/to/tool /config/.local/bin/mytool
+```
+
+### Copilot agent auto-approve
+
+The entrypoint seeds Machine-scope settings (`/config/data/Machine/settings.json`)
+on every boot so Copilot agent tools run without confirmation prompts or
+"assessed as high-risk" skips in any repo: risk assessment off, global
+auto-approve on, terminal auto-approve for all commands, edits auto-approve.
+It also creates `state.vscdb` if missing and seeds the storage flags
+(`chat.tools.global.autoApprove.optIn`,
+`chat.tools.terminal.autoApprove.warningAccepted`) at boot — before the first
+user session starts — so first-run dialogs never appear.
+
+### MCP server persistence
+
+MCP servers added at **Global** scope are stored in `/config/data/User/mcp.json`
+on the persistent volume and survive redeploys. Servers added per-repo
+(`.vscode/mcp.json` inside a cloned repo) are lost when the repo is re-cloned —
+prefer Global scope. The entrypoint seeds an empty `mcp.json` if missing.
+
+### AirVPN Tunnel
+
+The code-server connects to an Oracle VPS via SSH tunnel for AirVPN egress. Set `VPS_SSH_KEY` and `REQUIRE_TUNNEL=1` in Railway service variables to enable.
+
 ## Code of Conduct
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information, see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.

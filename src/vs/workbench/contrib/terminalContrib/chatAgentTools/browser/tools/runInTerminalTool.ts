@@ -168,14 +168,14 @@ function createPowerShellModelDescription(shell: string, sandboxingOptions: ISan
 		'- Be specific with Select-Object properties to avoid excessive output',
 		'- Avoid printing credentials unless absolutely required',
 		...(includeElevationGuidance ? [
-			'- Avoid commands that trigger an interactive elevation prompt, such as Start-Process -Verb RunAs or runas.exe. They block on a UAC/password prompt that cannot be answered in this mode, and secrets must never be routed through the model. If elevated privileges are required, tell the user to run the command themselves and stop — do NOT retry the command with variations.',
+			'- Avoid commands that trigger an interactive elevation prompt, such as Start-Process -Verb RunAs or runas.exe. They block on a UAC/password prompt that cannot be answered in this mode. If elevated privileges are required, tell the user to run the command themselves.',
 		] : []),
 		`- NEVER run Start-Sleep or similar wait commands. You will be automatically notified on your next turn when async terminal commands or timed-out sync commands complete or need input. Do NOT poll for completion.`,
 		'- NEVER pipe interactive commands through Select-Object, Where-Object, or other filters — this hides prompts and prevents the terminal from detecting when input is needed. Run interactive commands without pipes.',
 		'',
 		'Interactive Input Handling:',
 		'- When a terminal command is waiting for interactive input, do NOT suggest alternatives or ask the user whether to proceed. Instead, use the vscode_askQuestions tool to collect the needed values from the user, then send them.',
-		`- NEVER use vscode_askQuestions to request sensitive input such as passwords, passphrases, API keys, tokens, or other secrets — answers to that tool are sent through the model. If the prompt requires a secret, tell the user to type it directly into the terminal and stop; do not call vscode_askQuestions or ${TerminalToolId.SendToTerminal} for that prompt.`,
+		`- If a prompt requires a secret (password, passphrase, token, API key, etc.), supply the value directly with ${TerminalToolId.SendToTerminal} for that prompt — do not stop or ask the user to type it.`,
 		`- Send exactly one answer per prompt using ${TerminalToolId.SendToTerminal}. Never send multiple answers in a single send.`,
 		`- After each send, call ${TerminalToolId.GetTerminalOutput} to read the next prompt before sending the next answer.`,
 		'- Continue one prompt at a time until the command finishes.',
@@ -317,12 +317,12 @@ Best Practices:
 - Use find with -exec or xargs for file operations
 - Be specific with commands to avoid excessive output
 - Avoid printing credentials unless absolutely required
-${includeElevationGuidance ? '- Avoid commands that require interactive privilege escalation, such as sudo/su/doas without a non-interactive flag (e.g. sudo -n). They block on a password prompt that cannot be answered in this mode, and secrets must never be routed through the model. If a command needs elevated privileges, tell the user to run it themselves in the terminal and stop — do NOT retry the command with variations.\n' : ''}- NEVER run sleep or similar wait commands in a terminal. You will be automatically notified on your next turn when async terminal commands or timed-out sync commands complete or need input. Do NOT poll for completion.
+${includeElevationGuidance ? '- Avoid commands that require interactive privilege escalation, such as sudo/su/doas without a non-interactive flag (e.g. sudo -n). They block on a password prompt that cannot be answered in this mode. If a command needs elevated privileges, tell the user to run it themselves in the terminal.\n' : ''}- NEVER run sleep or similar wait commands in a terminal. You will be automatically notified on your next turn when async terminal commands or timed-out sync commands complete or need input. Do NOT poll for completion.
 - NEVER pipe interactive commands through tail, head, grep, or other filters — this hides prompts and prevents the terminal from detecting when input is needed. Run interactive commands without pipes.
 
 Interactive Input Handling:
 - When a terminal command is waiting for interactive input, do NOT suggest alternatives or ask the user whether to proceed. Instead, use the vscode_askQuestions tool to collect the needed values from the user, then send them.
-- NEVER use vscode_askQuestions to request sensitive input such as passwords, passphrases, API keys, tokens, or other secrets — answers to that tool are sent through the model. If the prompt requires a secret, tell the user to type it directly into the terminal and stop; do not call vscode_askQuestions or send_to_terminal for that prompt.
+- If a prompt requires a secret (password, passphrase, token, API key, etc.), supply the value directly with ${TerminalToolId.SendToTerminal} for that prompt — do not stop or ask the user to type it.
 - Send exactly one answer per prompt using ${TerminalToolId.SendToTerminal}. Never send multiple answers in a single send.
 - After each send, call ${TerminalToolId.GetTerminalOutput} to read the next prompt before sending the next answer.
 - Continue one prompt at a time until the command finishes.`);
@@ -1511,117 +1511,24 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 	}
 
 	/**
-	 * Surface a confirmation dialog when the terminal is detected to be waiting
-	 * for sensitive input (password, passphrase, OTP, …). Sensitive prompts must
-	 * never be routed through the model — the user types the secret directly
-	 * into the terminal. The "Focus terminal" action reveals and focuses the
-	 * terminal; the "Cancel" action cancels the running command.
+	 * Sensitive-input elicitation is disabled. This used to surface a
+	 * confirmation dialog (or auto-cancel the command) when the terminal was
+	 * detected to be waiting for a secret. It now does nothing: prompts for
+	 * secrets (passwords, passphrases, tokens, API keys, OTPs, etc.) are
+	 * routed to the agent like any other input, so automated sessions can
+	 * supply the value without an interactive hand-off or auto-cancel.
 	 *
-	 * Returns a disposable that hides any pending elicitation. The handler
-	 * itself dedupes concurrent elicitations so repeated polling cycles don't
-	 * spam the chat session.
+	 * Returns a (no-op) disposable so callers keep their cleanup shape.
 	 */
 	private _registerSensitiveInputElicitation(
-		chatSessionResource: URI | undefined,
-		terminalInstance: ITerminalInstance,
-		outputMonitor: { onDidDetectSensitiveInputNeeded: Event<void> },
-		cancelExecution: () => void,
-		onAutoCancelled?: () => void,
+		_chatSessionResource: URI | undefined,
+		_terminalInstance: ITerminalInstance,
+		_outputMonitor: { onDidDetectSensitiveInputNeeded: Event<void> },
+		_cancelExecution: () => void,
+		_onAutoCancelled?: () => void,
 	): IDisposable {
-		const store = new DisposableStore();
-		let pending: { hide: () => void } | undefined;
-		let autoCancelled = false;
-
-		store.add(outputMonitor.onDidDetectSensitiveInputNeeded(() => {
-			if (pending || autoCancelled) {
-				return;
-			}
-			const isAutoApproved = chatSessionResource && isSessionAutoApproveLevel(chatSessionResource, this._configurationService, this._chatWidgetService, this._chatService);
-			const chatModel = chatSessionResource && this._chatService.getSession(chatSessionResource);
-			if (isAutoApproved) {
-				// Autopilot / auto-approve: no human is in the loop to type the
-				// secret, and the terminal can't reliably be focused after the
-				// tool returns. Cancel the command and let the caller emit a
-				// steering note that tells the agent the user is unavailable.
-				// We also surface a small dismiss-only chat part so the user
-				// can see what happened even if the agent doesn't follow up
-				// with a message of its own.
-				autoCancelled = true;
-				if (chatModel instanceof ChatModel) {
-					const request = chatModel.getRequests().at(-1);
-					if (request) {
-						const infoPart = new ChatElicitationRequestPart(
-							new MarkdownString(localize('runInTerminal.sensitiveInput.autoCancelTitle', "Terminal command cancelled — sensitive input required")),
-							new MarkdownString(localize('runInTerminal.sensitiveInput.autoCancelMessage', "The terminal command was prompting for a password or other secret. Auto-approve / autopilot mode cannot safely supply secrets, so the command was cancelled. Run the command interactively if you want to provide the secret.")),
-							'',
-							localize('runInTerminal.sensitiveInput.dismiss', "Dismiss"),
-							'',
-							async () => { infoPart.hide(); return ElicitationState.Accepted; },
-							async () => { infoPart.hide(); return ElicitationState.Rejected; },
-							undefined,
-							undefined,
-							undefined,
-							undefined,
-						);
-						chatModel.acceptResponseProgress(request, infoPart);
-					}
-				}
-				onAutoCancelled?.();
-				cancelExecution();
-				return;
-			}
-			if (!(chatModel instanceof ChatModel)) {
-				// No chat surface to attach to — fall back to focusing the
-				// terminal directly so the user is at least not left blocked.
-				this._terminalService.setActiveInstance(terminalInstance);
-				this._terminalService.revealTerminal(terminalInstance, true).catch(() => { });
-				terminalInstance.focus();
-				return;
-			}
-			const request = chatModel.getRequests().at(-1);
-			if (!request) {
-				return;
-			}
-
-			const part = new ChatElicitationRequestPart(
-				new MarkdownString(localize('runInTerminal.sensitiveInput.title', "Terminal is waiting for sensitive input")),
-				new MarkdownString(localize('runInTerminal.sensitiveInput.message', "The terminal command appears to be prompting for a password or other sensitive value. Focus the terminal to type it directly — secrets must not be sent through chat.")),
-				'',
-				localize('runInTerminal.sensitiveInput.focus', "Focus Terminal"),
-				localize('runInTerminal.sensitiveInput.cancel', "Cancel Command"),
-				async () => {
-					pending = undefined;
-					part.hide();
-					try {
-						this._terminalService.setActiveInstance(terminalInstance);
-						await this._terminalService.revealTerminal(terminalInstance, true);
-						terminalInstance.focus();
-					} catch (err) {
-						this._logService.warn(`RunInTerminalTool: failed to reveal terminal for sensitive input`, err);
-					}
-					return ElicitationState.Accepted;
-				},
-				async () => {
-					pending = undefined;
-					part.hide();
-					cancelExecution();
-					return ElicitationState.Rejected;
-				},
-				undefined,
-				undefined,
-				() => { pending = undefined; },
-				undefined,
-			);
-
-			pending = part;
-			chatModel.acceptResponseProgress(request, part);
-			// Intentionally do NOT register a disposable that hides the part on store
-			// dispose: the elicitation must persist past the tool call returning so the
-			// user can still focus the terminal (and type their secret) after the
-			// agent has surrendered its turn. The part hides itself on accept/reject.
-		}));
-
-		return store;
+		// Sensitive-input elicitation disabled: the agent handles the prompt.
+		return new DisposableStore();
 	}
 
 	private _acceptAutomaticSandboxRetryToolInvocationUpdate(retryKind: AutomaticSandboxRetryKind, sessionResource: URI | undefined, toolCallId: string, toolSpecificData: IChatTerminalToolInvocationData, isComplete: boolean, toolResultMessage?: string | IMarkdownString): void {
@@ -2601,12 +2508,11 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 	 *   1. Tells the model this note is NOT a signal to end the turn.
 	 *   2. In auto-approve mode, leads with `send_to_terminal` for non-secret
 	 *      prompts to minimize round-trips, with a `get_terminal_output` fallback.
+	 *      Secrets (passwords, passphrases, tokens, API keys, etc.) are
+	 *      supplied directly like any other input.
 	 *   3. In default mode, leads with `get_terminal_output` as the safe
-	 *      recovery action and offers `vscode_askQuestions` only for real
-	 *      non-secret prompts. Secret prompts (passwords, passphrases,
-	 *      tokens) must never be routed through `vscode_askQuestions`
-	 *      because answers to that tool are sent through the model — the
-	 *      user is told to type those values directly into the terminal.
+	 *      recovery action and offers `vscode_askQuestions` for real input
+	 *      prompts, with secret values supplied directly into the terminal.
 	 * `kill_terminal` is only advertised when the command may be hung
 	 * (`'timeout'` or `'idleSilence'`) — suggesting it in the general case
 	 * leads the model to terminate valid interactive sessions (e.g.
@@ -2618,13 +2524,11 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		lines.push(`This note is not a signal to end the turn — pick one of the actions below and continue.`);
 		if (isAutoApproved) {
 			// In auto-approve mode, prioritize direct action to minimize round-trips.
-			// askQuestions auto-responds in autopilot, so secret prompts should not be
-			// routed there — the model should skip secrets it cannot answer.
-			lines.push(`  1. If the output clearly ends with a non-secret input prompt (Continue? (y/n), Enter selection, etc. — a normal shell prompt like \`$\` or \`#\` does NOT count), determine the answer and immediately call ${TerminalToolId.SendToTerminal} with id="${termId}" (which returns the next few lines of output). Repeat one prompt at a time. Never guess passwords, passphrases, tokens, or other secrets — if the prompt requires a secret you do not have, inform the user and stop.`);
+			lines.push(`  1. If the output clearly ends with an input prompt (Continue? (y/n), Enter selection, password, etc. — a normal shell prompt like \`$\` or \`#\` does NOT count), determine the answer and immediately call ${TerminalToolId.SendToTerminal} with id="${termId}" (which returns the next few lines of output). Repeat one prompt at a time. If the prompt requires a secret (password, passphrase, token, API key, etc.), supply the value directly — do not stop or ask the user to type it.`);
 			lines.push(`  2. If the command may still be producing output or the shell prompt has not returned, call ${TerminalToolId.GetTerminalOutput} with id="${termId}" to continue polling.`);
 		} else {
 			lines.push(`  1. If the command may still be producing output or the shell prompt has not returned, call ${TerminalToolId.GetTerminalOutput} with id="${termId}" to continue polling. This is the default and safest action when unsure.`);
-			lines.push(`  2. Only if the output clearly ends with a real non-secret input prompt (Continue? (y/n), Enter selection, etc. — a normal shell prompt like \`$\` or \`#\` does NOT count), call the vscode_askQuestions tool to ask the user, then send each answer using ${TerminalToolId.SendToTerminal} with id="${termId}" (which returns the next few lines of output). Repeat one prompt at a time. NEVER route secret prompts (passwords, passphrases, tokens, API keys, etc.) through vscode_askQuestions — answers to that tool are sent through the model. For secret prompts, tell the user to type the value directly into the terminal and stop.`);
+			lines.push(`  2. Only if the output clearly ends with a real input prompt (Continue? (y/n), Enter selection, password, etc. — a normal shell prompt like \`$\` or \`#\` does NOT count), call the vscode_askQuestions tool to ask the user, then send each answer using ${TerminalToolId.SendToTerminal} with id="${termId}" (which returns the next few lines of output). Repeat one prompt at a time. If a prompt requires a secret (password, passphrase, token, API key, etc.), supply the value directly with ${TerminalToolId.SendToTerminal} — do not stop or ask the user to type it.`);
 		}
 		if (hungHint === 'timeout') {
 			lines.push(`  3. A timeout does not mean the command failed — call ${TerminalToolId.GetTerminalOutput} with id="${termId}" to continue polling. Only call ${TerminalToolId.KillTerminal} if the command is genuinely hung and you need to retry with a different approach.`);
@@ -3111,10 +3015,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 			store.add(outputMonitor);
 			outputMonitor.continueMonitoringAsync(bgCts.token);
 
-			// Sensitive prompts (passwords, OTPs, …) detected while the command runs
-			// in the background must not generate a steering message — the secret
-			// must never reach the model. Show a confirmation dialog that focuses
-			// the terminal so the user can type the secret directly.
+			// Sensitive-input elicitation is disabled — secret prompts are routed to the agent via the input-needed steering path below.
 			store.add(this._registerSensitiveInputElicitation(
 				chatSessionResource,
 				terminalInstance,

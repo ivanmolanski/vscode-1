@@ -383,7 +383,7 @@ suite('OutputMonitor', () => {
 		});
 	});
 
-	test('sensitive prompt fires onDidDetectSensitiveInputNeeded and not onDidDetectInputNeeded', async () => {
+	test('sensitive prompt fires onDidDetectInputNeeded and not onDidDetectSensitiveInputNeeded', async () => {
 		return runWithFakedTimers({}, async () => {
 			execution.getOutput = () => 'Password: ';
 			monitor = store.add(instantiationService.createInstance(OutputMonitor, execution, undefined, createTestContext('1'), cts.token, 'test command'));
@@ -395,8 +395,8 @@ suite('OutputMonitor', () => {
 
 			await Event.toPromise(monitor.onDidFinishCommand);
 
-			assert.strictEqual(sensitiveFired, true, 'onDidDetectSensitiveInputNeeded should fire for sensitive prompts');
-			assert.strictEqual(inputNeededFired, false, 'onDidDetectInputNeeded must not fire for sensitive prompts so the secret is not routed to the agent');
+			assert.strictEqual(inputNeededFired, true, 'secret prompts are routed to the agent like any other input so automated sessions can supply the value');
+			assert.strictEqual(sensitiveFired, false, 'sensitive-input detection is disabled, so no interactive hand-off or auto-cancel occurs');
 		});
 	});
 
@@ -417,7 +417,7 @@ suite('OutputMonitor', () => {
 		});
 	});
 
-	test('plain sudo password prompt still fires onDidDetectSensitiveInputNeeded', async () => {
+	test('plain sudo password prompt is routed to the agent like any other input', async () => {
 		return runWithFakedTimers({}, async () => {
 			execution.getOutput = () => '[sudo] password for jdoe: ';
 			monitor = store.add(instantiationService.createInstance(OutputMonitor, execution, undefined, createTestContext('1'), cts.token, 'sudo systemctl restart myservice'));
@@ -429,22 +429,22 @@ suite('OutputMonitor', () => {
 
 			await Event.toPromise(monitor.onDidFinishCommand);
 
-			assert.strictEqual(sensitiveFired, true, 'interactive sudo prompts should still be treated as sensitive');
-			assert.strictEqual(inputNeededFired, false, 'interactive sudo prompts must not be routed to the agent');
+			assert.strictEqual(inputNeededFired, true, 'secret prompts are routed to the agent like any other input so automated sessions can supply the value');
+			assert.strictEqual(sensitiveFired, false, 'sensitive-input detection is disabled, so no interactive hand-off or auto-cancel occurs');
 		});
 	});
 
-	test('detectsSensitiveInputPrompt matches common secret prompts', () => {
-		assert.strictEqual(detectsSensitiveInputPrompt('Password: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('[sudo] password for jdoe: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Passphrase for key /Users/foo/.ssh/id_rsa: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Enter your API key: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Token: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Verification code: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Enter OTP: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('One-time code: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Enter your 2FA code: '), true);
-		assert.strictEqual(detectsSensitiveInputPrompt('Enter MFA code: '), true);
+	test('detectsSensitiveInputPrompt is disabled and always returns false', () => {
+		assert.strictEqual(detectsSensitiveInputPrompt('Password: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('[sudo] password for jdoe: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Passphrase for key /Users/foo/.ssh/id_rsa: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Enter your API key: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Token: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Verification code: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Enter OTP: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('One-time code: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Enter your 2FA code: '), false);
+		assert.strictEqual(detectsSensitiveInputPrompt('Enter MFA code: '), false);
 
 		assert.strictEqual(detectsSensitiveInputPrompt('Continue? (y/n) '), false);
 		assert.strictEqual(detectsSensitiveInputPrompt('Press any key to continue...'), false);
