@@ -55,6 +55,7 @@ RUN apt-get update && \
 	docker.io \
 	iproute2 \
 	socat \
+	tini \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -72,7 +73,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - && \
 # package relies on a postinstall download that can silently fail and leave a
 # broken shim ("could not find the CLI binary"). -y skips the confirmation
 # prompt; --bin-dir puts the binary in /usr/local/bin (already on PATH).
-RUN curl -fsSL https://railway.com/install.sh | bash -s -- -y -b /usr/local/bin && \
+# --retry/--retry-all-errors guard against transient rate limits (HTTP 429)
+# from the install CDN: with -f, a 429 aborts curl, leaving an empty script
+# and a "command not found" (exit 127) at `railway --version`.
+RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://railway.com/install.sh | bash -s -- -y -b /usr/local/bin && \
 	railway --version
 
 # npm global installs live in /usr/local (already on PATH automatically,
@@ -279,6 +283,7 @@ RUN set -eux; \
 	su abc -s /bin/bash -c 'rustc --version && cargo --version'; \
 	ssh -V; \
 	autossh -V; \
+	tini --version; \
 	ssh-keygen -l -f /root/.ssh/known_hosts >/dev/null; \
 	/usr/sbin/privoxy --version; \
 	echo "All toolchains OK"
@@ -288,4 +293,11 @@ RUN set -eux; \
 # binds $PORT and relays the other port to it, so both always answer.
 EXPOSE 8443 8080
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# tini as PID 1: the entrypoint execs code-server directly (bypassing the
+# linuxserver s6 overlay), so without an init the Node process is PID 1 and
+# never reaps orphaned grandchildren. Agent extensions (Kilo Code) spawn MCP
+# servers (docker/ssh/npx) that get orphaned to PID 1 and pile up as zombies
+# until the container hits its PID cgroup limit (pids.max=1000) — after which
+# every fork fails with "spawn EAGAIN" / "forkpty(3) failed" and terminals and
+# language servers stop working. tini reaps those zombies and forwards signals.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
