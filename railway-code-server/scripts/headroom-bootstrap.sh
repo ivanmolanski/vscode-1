@@ -51,12 +51,24 @@ if [ ! -x "$VENV/bin/headroom" ]; then
   python3 -m venv "$VENV" || { echo "ERROR: python3 -m venv failed"; exit 0; }
   "$VENV/bin/pip" install --quiet --upgrade pip || true
   "$VENV/bin/pip" install --quiet "$PIN" || echo "ERROR: pip install $PIN failed"
+  # The box routes ALL egress through an AirVPN SOCKS5 tunnel
+  # (ALL_PROXY=socks5h://127.0.0.1:1080). headroom's httpx client needs the
+  # socksio extra, otherwise the proxy crash-loops at startup with
+  # "ImportError: Using SOCKS proxy, but the 'socksio' package is not
+  # installed" and nothing listens on :8787 (Copilot -> ECONNREFUSED).
+  "$VENV/bin/pip" install --quiet socksio || echo "WARNING: socksio install failed (proxy will crash-loop on SOCKS egress)"
 fi
 # Keep it at the known-good pin (no-op / offline-safe when already correct).
 installed="$("$VENV/bin/pip" show headroom-ai 2>/dev/null | awk -F': ' '/^Version:/{print $2}')"
 if [ "$installed" != "0.39.1" ]; then
   echo "headroom-ai version '$installed' != 0.39.1 -> reinstalling"
   "$VENV/bin/pip" install --quiet "$PIN" || echo "ERROR: pip pin failed"
+fi
+# Guarantee SOCKS support even for a venv that predates this fix (idempotent;
+# a persisted volume venv may exist but lack socksio).
+if ! "$VENV/bin/python" -c "import socksio" >/dev/null 2>&1; then
+  echo "socksio missing -> installing (headroom httpx needs it for SOCKS egress)"
+  "$VENV/bin/pip" install --quiet socksio || echo "WARNING: socksio install failed (proxy will crash-loop on SOCKS egress)"
 fi
 
 # 3. Start the self-heal watchdog (idempotent; launches proxy if down).
