@@ -69,14 +69,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - && \
 	rm -rf /var/lib/apt/lists/*
 
 # Railway CLI — installed at build time so it persists in the image.
-# Use the official installer (single static binary) instead of npm: the npm
-# package relies on a postinstall download that can silently fail and leave a
-# broken shim ("could not find the CLI binary"). -y skips the confirmation
-# prompt; --bin-dir puts the binary in /usr/local/bin (already on PATH).
-# --retry/--retry-all-errors guard against transient rate limits (HTTP 429)
-# from the install CDN: with -f, a 429 aborts curl, leaving an empty script
-# and a "command not found" (exit 127) at `railway --version`.
-RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://railway.com/install.sh | bash -s -- -y -b /usr/local/bin && \
+# Install the static binary straight from the GitHub release instead of the
+# railway.com/install.sh CDN: that CDN rate-limits build IPs with HTTP 429,
+# which (with curl -f) aborts the download and leaves `railway` missing
+# (exit 127). GitHub release assets are not rate-limited this way.
+ARG RAILWAY_CLI_VERSION=v5.63.1
+RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+	"https://github.com/railwayapp/cli/releases/download/${RAILWAY_CLI_VERSION}/railway-${RAILWAY_CLI_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+	| tar -xz -C /usr/local/bin railway && \
+	chmod +x /usr/local/bin/railway && \
 	railway --version
 
 # npm global installs live in /usr/local (already on PATH automatically,

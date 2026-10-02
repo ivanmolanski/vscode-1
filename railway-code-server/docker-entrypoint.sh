@@ -94,12 +94,19 @@ export PATH="/config/.local/bin:$PATH"
 
 # Railway CLI — self-healing: the image ships a working binary; if it is
 # missing or broken (e.g. a broken npm shim shadowed it), reinstall the
-# latest via the official installer. Install directly into /config/.local/bin
-# (first on PATH) so the active executable is replaced; -y skips the prompt.
+# latest via the GitHub release (the railway.com/install.sh CDN rate-limits
+# with HTTP 429). Install directly into /config/.local/bin (first on PATH)
+# so the active executable is replaced.
 mkdir -p /config/.local/bin
 if ! railway --version >/dev/null 2>&1; then
 	echo "[entrypoint] Railway CLI missing or broken — reinstalling latest..."
-	curl -fsSL https://railway.com/install.sh | bash -s -- -y -b /config/.local/bin >/dev/null 2>&1 || true
+	railway_tag="$(curl -fsSL https://api.github.com/repos/railwayapp/cli/releases/latest 2>/dev/null | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)"
+	if [ -n "$railway_tag" ]; then
+		curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+			"https://github.com/railwayapp/cli/releases/download/${railway_tag}/railway-${railway_tag}-x86_64-unknown-linux-musl.tar.gz" \
+			| tar -xz -C /config/.local/bin railway 2>/dev/null || true
+		chmod +x /config/.local/bin/railway 2>/dev/null || true
+	fi
 fi
 if [ -x /usr/local/bin/railway ] && [ ! -x /config/.local/bin/railway ]; then
 	ln -sf /usr/local/bin/railway /config/.local/bin/railway 2>/dev/null || true
