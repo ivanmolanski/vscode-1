@@ -1,6 +1,8 @@
 # code-server (VS Code in the browser) on Railway
 # Base: linuxserver/code-servers — web GUI on port 8443, state persisted in /config
-FROM lscr.io/linuxserver/code-server:latest
+# Pinned to 4.140.0 (VS Code 1.140) — a floating :latest would freeze at build
+# time and silently drift; pin so deploys are reproducible and upgrades are deliberate.
+FROM lscr.io/linuxserver/code-server:4.140.0
 
 # ---------------------------------------------------------------------------
 # APT PERSISTENCE — keep lists so apt-get upgrade works at runtime.
