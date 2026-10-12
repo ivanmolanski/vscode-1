@@ -46,6 +46,16 @@ WORKDIR="/config/.headroom/kali-rolling"
 # Keep OpenBLAS/OMP quiet and single-threaded (large-RAM box, small proxy).
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 
+# System-prompt compression ON (operator request, 2026-10-12). Headroom's
+# "coding" savings profile ships compress_system_messages=false because the
+# system prompt is the hottest provider prefix-cache segment; the operator
+# wants it on across the whole stack and accepts the cache trade-off. This env
+# var is the ONLY switch (Headroom exposes no per-request header for it), and
+# the explicit value wins over the profile via setdefault in
+# headroom.agent_savings.apply_proxy_env_defaults. Applies to this PATH-2
+# proxy, i.e. VS Code native Copilot -> 127.0.0.1:8787.
+export HEADROOM_COMPRESS_SYSTEM_MESSAGES=1
+
 # GitHub Copilot credential — use the OAuth file, NOT the PAT.
 #
 # headroom's token provider (copilot_auth.py get_api_token) returns
