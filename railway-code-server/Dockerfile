@@ -230,6 +230,16 @@ COPY --chmod=755 scripts/headroom-proxy.sh /usr/local/lib/headroom/headroom-prox
 COPY --chmod=755 scripts/headroom-watchdog.sh /usr/local/lib/headroom/headroom-watchdog.sh
 COPY --chmod=755 scripts/headroom-bootstrap.sh /usr/local/lib/headroom/headroom-bootstrap.sh
 
+# Client-config persistence: config-persist.sh + its baseline seeds. On boot,
+# docker-entrypoint.sh runs it to snapshot operator state and re-fill any
+# managed config key that is missing — without overwriting operator edits — so
+# VS Code / Kilo / MCP / skill configuration survives a redeploy. The seeds are
+# shipped WITHOUT credentials; secrets are injected from the environment (or
+# /config/.config-secrets.env) at boot. See scripts/config-persist.sh.
+COPY --chmod=755 scripts/config-persist.sh /usr/local/lib/config/config-persist.sh
+COPY scripts/config-seeds/ /usr/local/lib/config/config-seeds/
+RUN chmod -R a+rX /usr/local/lib/config
+
 # ---------------------------------------------------------------------------
 # AirVPN tunnel — SSH dynamic SOCKS proxy through Oracle VPS (port 443).
 # The VCN security list + instance iptables now allow inbound TCP 443 (v4+v6),

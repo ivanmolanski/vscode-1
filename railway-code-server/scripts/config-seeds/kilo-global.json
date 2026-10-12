@@ -1,0 +1,188 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "reasoning_display": "preview",
+  "terminal_command_display": "collapsed",
+  "experimental": {
+    "batch_tool": true,
+    "image_generation": true
+  },
+  "indexing": {
+    "enabled": true,
+    "provider": "openrouter",
+    "model": "voyageai/voyage-4",
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    },
+    "dimension": 1024
+  },
+  "disabled_providers": [],
+  "provider": {
+    "headroom": {
+      "name": "headroom",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://wa0xhxcwtn80-headroom.gear.hyperai.host/v1",
+        "apiKey": "${HEADROOM_API_KEY}"
+      },
+      "models": {
+        "qwen3.8-27b-q6kp-fastmtp": {
+          "name": "Qwen3.8-27B Q6_K_P + FastMTP (Headroom)",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 147456,
+            "input": 114688,
+            "output": 32768
+          },
+          "options": {
+            "temperature": 1,
+            "top_p": 0.95,
+            "top_k": 20,
+            "min_p": 0,
+            "presence_penalty": 0,
+            "repetition_penalty": 1
+          },
+          "variants": {
+            "low": {
+              "reasoning_effort": "low"
+            },
+            "medium": {
+              "reasoning_effort": "medium"
+            },
+            "xhigh": {
+              "reasoning_effort": "xhigh"
+            }
+          }
+        }
+      }
+    }
+  },
+  "autoupdate": false,
+  "permission": {
+    "*": "allow",
+    "*_*": "allow",
+    "read": "allow",
+    "edit": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "bash": "allow",
+    "task": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "semantic_search": "allow",
+    "kilo_memory_save": "allow",
+    "kilo_memory_recall": "allow",
+    "lsp": "allow",
+    "skill": "allow",
+    "external_directory": "allow",
+    "todowrite": "allow",
+    "todoread": "allow",
+    "question": "allow",
+    "doom_loop": "allow",
+    "background_process": "allow",
+    "agent_manager": "allow",
+    "agent_manager_models": "allow",
+    "board_post": "allow",
+    "board_read": "allow",
+    "generate_image": "allow",
+    "browser_open": "allow",
+    "link_pr": "allow",
+    "open_plan": "allow",
+    "plan_exit": "allow",
+    "chart": "allow",
+    "context7_query-docs": "allow",
+    "context7_resolve-library-id": "allow",
+    "brave-search_brave_local_search": "allow",
+    "brave-search_brave_web_search": "allow",
+    "kilo-playwright_browser_click": "allow",
+    "kilo-playwright_browser_close": "allow",
+    "kilo-playwright_browser_console_messages": "allow",
+    "kilo-playwright_browser_drag": "allow",
+    "kilo-playwright_browser_drop": "allow",
+    "kilo-playwright_browser_emulate_media": "allow",
+    "kilo-playwright_browser_evaluate": "allow",
+    "kilo-playwright_browser_file_upload": "allow",
+    "kilo-playwright_browser_fill_form": "allow",
+    "kilo-playwright_browser_find": "allow",
+    "kilo-playwright_browser_handle_dialog": "allow",
+    "kilo-playwright_browser_hover": "allow",
+    "kilo-playwright_browser_navigate": "allow",
+    "kilo-playwright_browser_navigate_back": "allow",
+    "kilo-playwright_browser_network_request": "allow",
+    "kilo-playwright_browser_network_requests": "allow",
+    "kilo-playwright_browser_press_key": "allow",
+    "kilo-playwright_browser_resize": "allow",
+    "kilo-playwright_browser_run_code_unsafe": "allow",
+    "kilo-playwright_browser_select_option": "allow",
+    "kilo-playwright_browser_snapshot": "allow",
+    "kilo-playwright_browser_tabs": "allow",
+    "kilo-playwright_browser_take_screenshot": "allow",
+    "kilo-playwright_browser_type": "allow",
+    "kilo-playwright_browser_wait_for": "allow"
+  },
+  "web_search": true,
+  "mcp": {
+    "brave-search": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "environment": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "enabled": true
+    },
+    "github": {
+      "type": "local",
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "-e",
+        "GITHUB_READ_ONLY",
+        "ghcr.io/github/github-mcp-server@sha256:2afb26356481d1a350e14544a6e160f7f7ec1561a1ea309b823665abf0309036",
+        "stdio"
+      ],
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "GITHUB_READ_ONLY": "1"
+      }
+    }
+  },
+  "model": "headroom/qwen3.8-27b-q6kp-fastmtp",
+  "agent": {
+    "code": {
+      "model": "headroom/qwen3.8-27b-q6kp-fastmtp",
+      "variant": "xhigh"
+    },
+    "ask": {
+      "model": "headroom/qwen3.8-27b-q6kp-fastmtp",
+      "variant": "xhigh"
+    },
+    "debug": {
+      "model": "headroom/qwen3.8-27b-q6kp-fastmtp",
+      "variant": "xhigh"
+    },
+    "orchestrator": {
+      "model": "headroom/qwen3.8-27b-q6kp-fastmtp",
+      "variant": "xhigh"
+    },
+    "plan": {
+      "model": "headroom/qwen3.8-27b-q6kp-fastmtp",
+      "variant": "xhigh"
+    }
+  },
+  "compaction": {
+    "threshold_percent": 80
+  },
+  "retention": {
+    "enabled": true
+  },
+  "share": "auto"
+}

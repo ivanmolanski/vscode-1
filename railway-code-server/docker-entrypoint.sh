@@ -741,6 +741,23 @@ if [ -f /usr/local/lib/headroom/headroom-bootstrap.sh ]; then
 		|| echo "[entrypoint] WARNING: headroom bootstrap failed (non-fatal); code-server starting anyway" >&2
 fi
 
+# ---------------------------------------------------------------------------
+# Client-config persistence (survives redeploys).
+#
+# The builder configs (VS Code BYOK models / MCP servers, Cursor + VS Code
+# global-scope MCP, the Kilo global config, and agent skills) already live on
+# the /config volume, but a deploy can reset them. This snapshots the operator
+# state and re-fills any managed key that is missing — WITHOUT ever overwriting
+# an operator-edited value — so changes made in the client stick. Runs before
+# code-server starts and before the auth repair below (which then re-asserts
+# the Headroom header exactly). NON-FATAL: a failure never blocks startup.
+# ---------------------------------------------------------------------------
+if [ -f /usr/local/lib/config/config-persist.sh ]; then
+	echo "[entrypoint] Persisting client configs (snapshot + fill)..."
+	bash /usr/local/lib/config/config-persist.sh \
+		|| echo "[entrypoint] WARNING: config persistence failed (non-fatal); code-server starting anyway" >&2
+fi
+
 # Headroom auth repair. Copilot's customendpoint vendor does NOT substitute
 # ${apiKey} inside requestHeaders - it is sent verbatim, so the Headroom
 # gateway saw "Bearer ${apiKey}" and answered 401 for every request. The key

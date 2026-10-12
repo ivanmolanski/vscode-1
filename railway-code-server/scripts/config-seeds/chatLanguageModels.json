@@ -1,0 +1,288 @@
+[
+  {
+    "name": "Openrouter",
+    "vendor": "openrouter",
+    "apiKey": "${input:chat.lm.secret.4b25ac59}",
+    "settings": {
+      "inclusionai/ling-3.0-tiny:free": {
+        "reasoningEffort": "high"
+      },
+      "poolside/laguna-s-2.1:free": {
+        "reasoningEffort": "high"
+      },
+      "google/gemma-4-31b-it:free": {
+        "reasoningEffort": "high"
+      },
+      "nvidia/nemotron-3-nano-30b-a3b:free": {
+        "reasoningEffort": "high"
+      },
+      "nvidia/nemotron-3.5-lightning:free": {
+        "reasoningEffort": "high"
+      },
+      "upstage/solar-pro4": {
+        "reasoningEffort": "high"
+      },
+      "tencent/hy3": {
+        "reasoningEffort": "high"
+      },
+      "deepseek/deepseek-v4-flash-0731": {
+        "reasoningEffort": "high"
+      },
+      "liquid/lfm-2.5-2.6b:free": {
+        "reasoningEffort": "high"
+      },
+      "cohere/north-mini-code:free": {
+        "reasoningEffort": "high"
+      },
+      "xiaomi/mimo-v2.5": {
+        "reasoningEffort": "high"
+      },
+      "stealth/ox-alpha": {
+        "reasoningEffort": "high"
+      },
+      "google/gemini-3.7-flash:batch": {
+        "reasoningEffort": "high"
+      },
+      "google/gemini-3.7-flash": {
+        "reasoningEffort": "high"
+      },
+      "z-ai/glm-5.2:free": {
+        "reasoningEffort": "high"
+      },
+      "z-ai/glm-5.2": {
+        "reasoningEffort": "high"
+      },
+      "openai/gpt-5.6-luna": {
+        "reasoningEffort": "high"
+      },
+      "minimax/minimax-m3:free": {
+        "reasoningEffort": "high"
+      },
+      "thinkingmachines/inkling:free": {
+        "reasoningEffort": "high"
+      },
+      "inception/mercury-2.5-preview": {
+        "reasoningEffort": "high"
+      },
+      "ibm-granite/granite-4.2-8b": {
+        "reasoningEffort": "high"
+      },
+      "deepseek/deepseek-v4.1-flash": {
+        "reasoningEffort": "max"
+      },
+      "z-ai/glm-5.3-flash": {
+        "reasoningEffort": "high"
+      },
+      "inclusionai/ling-3.0-flash-vl:free": {
+        "reasoningEffort": "high"
+      },
+      "dots-studio/dots-3-note-preview:free": {
+        "reasoningEffort": "high"
+      },
+      "z-ai/glm-5.3-flashx": {
+        "reasoningEffort": "high"
+      },
+      "xiaomi/mimo-v2.6-pro": {
+        "reasoningEffort": "high"
+      },
+      "sakana/fugu-max": {
+        "reasoningEffort": "high"
+      },
+      "inclusionai/ling-3.0-flash-fin:free": {
+        "reasoningEffort": "high"
+      },
+      "z-ai/glm-5.3": {
+        "reasoningEffort": "high"
+      },
+      "stealth/space-bunny-alpha": {
+        "reasoningEffort": "high"
+      },
+      "meta/muse-spark-1.3": {
+        "reasoningEffort": "high"
+      },
+      "apodex/apodex-1.1-mini:free": {
+        "reasoningEffort": "high"
+      }
+    }
+  },
+  {
+    "name": "Copilot",
+    "vendor": "copilot",
+    "settings": {
+      "mai-code-1.1-flash": {
+        "reasoningEffort": "high"
+      },
+      "claude-opus-4.8": {
+        "reasoningEffort": "max"
+      },
+      "gpt-5.6-luna": {
+        "reasoningEffort": "max"
+      },
+      "grok-4.7": {
+        "contextSize": 425001,
+        "reasoningEffort": "xhigh"
+      },
+      "gpt-6.1-sol": {
+        "reasoningEffort": "max",
+        "contextSize": 922000
+      }
+    }
+  },
+  {
+    "name": "OpenRouter",
+    "vendor": "customendpoint",
+    "apiKey": "${input:chat.lm.secret.3e2bbd3}",
+    "settings": {
+      "nvidia/nemotron-3-ultra-550b-a55b:free": {
+        "reasoningEffort": "high"
+      },
+      "tencent/hy4-preview": {
+        "reasoningEffort": "high"
+      },
+      "nex-agi/nex-n2.5-pro:free": {
+        "reasoningEffort": "high"
+      }
+    }
+  },
+  {
+    "name": "HyperLLM (internal)",
+    "vendor": "customendpoint",
+    "apiKey": "${input:chat.lm.secret.-2267da5a}",
+    "apiType": "chat-completions",
+    "models": [
+      {
+        "id": "qwen3.8-27b-q6kp-fastmtp",
+        "name": "Qwen3.8-27B Q6_K_P + FastMTP (HyperAI internal)",
+        "url": "http://127.0.0.1:18080/v1/chat/completions",
+        "toolCalling": true,
+        "vision": false,
+        "maxInputTokens": 114688,
+        "maxOutputTokens": 32768,
+        "contextWindow": 147456,
+        "thinking": true,
+        "streaming": true,
+        "supportsReasoningEffort": [
+          "low",
+          "medium",
+          "xhigh"
+        ],
+        "defaultReasoningEffort": "xhigh",
+        "reasoningEffortFormat": "chat-completions",
+        "modelOptions": {
+          "temperature": 1,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0,
+          "presence_penalty": 0,
+          "repetition_penalty": 1
+        }
+      }
+    ]
+  },
+  {
+    "name": "HyperLLM (external)",
+    "vendor": "customendpoint",
+    "apiKey": "${input:chat.lm.secret.5488b7b6}",
+    "apiType": "chat-completions",
+    "models": [
+      {
+        "id": "qwen3.8-27b-q6kp-fastmtp",
+        "name": "Qwen3.8-27B Q6_K_P + FastMTP (Headroom public)",
+        "url": "http://140.238.139.20:18080/v1",
+        "toolCalling": true,
+        "vision": false,
+        "maxInputTokens": 114688,
+        "maxOutputTokens": 32768,
+        "contextWindow": 147456,
+        "thinking": true,
+        "streaming": true,
+        "supportsReasoningEffort": [
+          "low",
+          "medium",
+          "xhigh"
+        ],
+        "defaultReasoningEffort": "xhigh",
+        "reasoningEffortFormat": "chat-completions",
+        "modelOptions": {
+          "temperature": 1,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0,
+          "presence_penalty": 0,
+          "repetition_penalty": 1
+        },
+        "apiKey": "${input:chat.lm.secret.-67a17bbe}",
+        "requestHeaders": {
+          "Authorization": "Bearer ${HEADROOM_API_KEY}"
+        }
+      }
+    ]
+  },
+  {
+    "name": "HyperLLM (CPU headroom)",
+    "vendor": "customendpoint",
+    "apiKey": "${input:chat.lm.secret.3a2224b1}",
+    "apiType": "chat-completions",
+    "models": [
+      {
+        "id": "qwen3.8-27b-q6kp-fastmtp",
+        "name": "Qwen3.8-27B Q6_K_P + FastMTP (CPU Headroom)",
+        "url": "https://wa0xhxcwtn80-headroom.gear.hyperai.host/v1/chat/completions",
+        "toolCalling": true,
+        "vision": false,
+        "maxInputTokens": 114688,
+        "maxOutputTokens": 32768,
+        "contextWindow": 147456,
+        "thinking": true,
+        "streaming": true,
+        "supportsReasoningEffort": [
+          "low",
+          "medium",
+          "xhigh"
+        ],
+        "reasoningEffortFormat": "chat-completions",
+        "defaultReasoningEffort": "xhigh",
+        "modelOptions": {
+          "temperature": 1,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0,
+          "presence_penalty": 0,
+          "repetition_penalty": 1
+        },
+        "requestHeaders": {
+          "Authorization": "Bearer ${apiKey}"
+        }
+      }
+    ],
+    "settings": {
+      "qwen3.8-27b-q6kp-fastmtp": {
+        "reasoningEffort": "xhigh"
+      }
+    }
+  },
+  {
+    "name": "Copilot",
+    "vendor": "agent-host-copilotcli",
+    "settings": {
+      "auto": {
+        "tier": "intelligence"
+      }
+    }
+  },
+  {
+    "name": "OpenRouter",
+    "vendor": "openrouter",
+    "apiKey": "${input:chat.lm.secret.7fcd6c5d}"
+  },
+  {
+    "name": "OpenRouter 2",
+    "vendor": "openrouter",
+    "apiKey": "${input:chat.lm.secret.-6da66888}",
+    "settings": {
+      "inclusionai/ling-3.1-flash": {
+        "reasoningEffort": "high"
+      }
+    }
+  }
+]
