@@ -238,6 +238,7 @@ COPY --chmod=755 scripts/headroom-bootstrap.sh /usr/local/lib/headroom/headroom-
 # /config/.config-secrets.env) at boot. See scripts/config-persist.sh.
 COPY --chmod=755 scripts/config-persist.sh /usr/local/lib/config/config-persist.sh
 COPY scripts/config-seeds/ /usr/local/lib/config/config-seeds/
+COPY scripts/skills-seed/ /usr/local/lib/config/skills-seed/
 RUN chmod -R a+rX /usr/local/lib/config
 
 # ---------------------------------------------------------------------------
