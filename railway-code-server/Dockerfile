@@ -4,6 +4,12 @@
 # time and silently drift; pin so deploys are reproducible and upgrades are deliberate.
 FROM lscr.io/linuxserver/code-server:4.140.0
 
+# The OSS distribution omits Microsoft's optional signing and regex-language
+# modules, although the browser bundle still references them. Use the existing
+# unsigned-handshake and ML language-detection fallbacks without fetching 404s.
+COPY scripts/patch-optional-assets.cjs /usr/local/lib/code-server/patch-optional-assets.cjs
+RUN /app/code-server/lib/node /usr/local/lib/code-server/patch-optional-assets.cjs
+
 # ---------------------------------------------------------------------------
 # APT PERSISTENCE — keep lists so apt-get upgrade works at runtime.
 # The /config volume persists across restarts; we back up apt state there
