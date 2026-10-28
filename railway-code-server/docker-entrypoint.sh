@@ -805,7 +805,7 @@ fi
 # reaping stdio MCP server processes that are orphaned or dormant, and nothing
 # else. Log: /config/.pid-governor.log. Disable with PID_GOVERNOR=0.
 if [ "${PID_GOVERNOR:-1}" != "0" ] && command -v node >/dev/null 2>&1; then
-	node /usr/local/lib/pid-governor/pid-governor.cjs >>/config/.pid-governor.stdout 2>&1 &
+	node /usr/local/lib/pid-governor/pid-governor.cjs &
 fi
 
 echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
