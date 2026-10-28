@@ -235,6 +235,9 @@ COPY --chmod=755 clone-repo.sh /usr/local/bin/clone-repo.sh
 COPY --chmod=755 scripts/headroom-proxy.sh /usr/local/lib/headroom/headroom-proxy.sh
 COPY --chmod=755 scripts/headroom-watchdog.sh /usr/local/lib/headroom/headroom-watchdog.sh
 COPY --chmod=755 scripts/headroom-bootstrap.sh /usr/local/lib/headroom/headroom-bootstrap.sh
+# PID governor: keeps the container under its pids limit by reaping orphaned or
+# dormant stdio MCP servers. Started from docker-entrypoint.sh. See the script.
+COPY --chmod=755 scripts/pid-governor.cjs /usr/local/lib/pid-governor/pid-governor.cjs
 
 # Client-config persistence: config-persist.sh + its baseline seeds. On boot,
 # docker-entrypoint.sh runs it to snapshot operator state and re-fill any
