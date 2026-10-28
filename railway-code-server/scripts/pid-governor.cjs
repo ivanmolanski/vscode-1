@@ -67,6 +67,14 @@ function classify(cmd) {
   return null;
 }
 
+// A shell wrapper (bash -c "...") can carry an MCP package name in its
+// arguments without being an MCP server. Its MCP child is still a root because
+// the child's parent is not in the same class, so skipping the shell loses nothing.
+function isShellCmd(cmd) {
+  const argv0 = cmd.split(' ')[0] || '';
+  return /(^|\/)(bash|sh|dash|zsh)$/.test(argv0);
+}
+
 function readText(p) {
   try {
     return fs.readFileSync(p, 'utf8');
@@ -127,7 +135,7 @@ function readProcs() {
       start: f[19],
       tasks,
       cmd,
-      cls: state === 'Z' ? null : classify(cmd),
+      cls: state === 'Z' || isShellCmd(cmd) ? null : classify(cmd),
       active: 0,
       orphanSince: null,
     });
@@ -232,10 +240,13 @@ function alwaysPlan(snap, now) {
   }
   for (const [cls, list] of byClass) {
     if (list.length <= CFG.maxPerServer) continue;
-    list.sort((a, b) => lastActive(snap, b) - lastActive(snap, a));
-    for (const r of list.slice(CFG.maxPerServer)) {
-      if (now - lastActive(snap, r) >= CFG.evictIdleMs) {
-        out.push({ root: r, why: `duplicate ${cls} beyond ${CFG.maxPerServer}` });
+    // lastActive walks the subtree; cache it once per root instead of inside sort.
+    const withLast = list
+      .map((r) => ({ root: r, last: lastActive(snap, r) }))
+      .sort((a, b) => b.last - a.last);
+    for (const x of withLast.slice(CFG.maxPerServer)) {
+      if (now - x.last >= CFG.evictIdleMs) {
+        out.push({ root: x.root, why: `duplicate ${cls} beyond ${CFG.maxPerServer}` });
       }
     }
   }
@@ -259,6 +270,9 @@ function readCurrent(snap) {
   return { n: snap.total, src: 'counted' };
 }
 
+// Returns { n: null } when no finite limit is visible (cgroup pids.max and
+// RLIMIT_NPROC both unlimited). The pressure rule is then off; orphan and
+// duplicate reaping still run. PID_LIMIT sets an explicit limit.
 function readLimit() {
   if (CFG.limitOverride > 0) return { n: CFG.limitOverride, src: 'PID_LIMIT' };
   for (const f of ['/sys/fs/cgroup/pids.max', '/sys/fs/cgroup/pids/pids.max']) {
@@ -268,7 +282,7 @@ function readLimit() {
   const limits = readText('/proc/self/limits') || '';
   const m = limits.match(/^Max processes\s+(\S+)/m);
   if (m && /^\d+$/.test(m[1])) return { n: Number(m[1]), src: 'RLIMIT_NPROC' };
-  return { n: 1000, src: 'default' };
+  return { n: null, src: 'none' };
 }
 
 function alive(p) {
@@ -310,6 +324,7 @@ async function reap(snap, root, why) {
 
 let inPressure = false;
 let stuck = false;
+let noLimitLogged = false;
 
 async function tick() {
   let snap = scan();
@@ -320,6 +335,14 @@ async function tick() {
     await reap(snap, item.root, item.why);
   }
   snap = scan();
+
+  if (limit.n === null) {
+    if (!noLimitLogged) {
+      noLimitLogged = true;
+      log('pressure rule off: no finite pids limit is visible (cgroup pids.max and RLIMIT_NPROC are unlimited); set PID_LIMIT to enable it');
+    }
+    return;
+  }
 
   let cur = readCurrent(snap);
   let pct = (cur.n / limit.n) * 100;
@@ -356,7 +379,7 @@ async function main() {
     `start interval=${CFG.intervalMs / 1000}s high=${CFG.highPct}% target=${CFG.targetPct}% ` +
       `orphan_grace=${CFG.orphanGraceMs / 1000}s evict_idle=${CFG.evictIdleMs / 1000}s ` +
       `max_per_server=${CFG.maxPerServer} kill_grace=${CFG.killGraceMs / 1000}s ` +
-      `dry_run=${CFG.dryRun} limit=${limit.n} (${limit.src})`,
+      `dry_run=${CFG.dryRun} limit=${limit.n ?? 'none'} (${limit.src})`,
   );
   for (;;) {
     try {
