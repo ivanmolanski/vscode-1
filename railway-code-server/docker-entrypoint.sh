@@ -798,6 +798,32 @@ PY
 	fi
 fi
 
+# ---------------------------------------------------------------------------
+# Resource watch (read-only). Railway caps the container at pids.max=1000
+# (see the tini note in the Dockerfile); when it is reached, forks fail with
+# EAGAIN and the editor's workers abort. Every 5 minutes this appends the
+# current pids/thread count and the top process names to
+# /config/.resource-watch.log (kept to the last 3000 lines), so the process mix
+# at the time of an EAGAIN is on the volume. Disable with RESOURCE_WATCH=0.
+# ---------------------------------------------------------------------------
+resource_watch() {
+	local log=/config/.resource-watch.log cur max threads
+	while :; do
+		cur="$(cat /sys/fs/cgroup/pids.current /sys/fs/cgroup/pids/pids.current 2>/dev/null | head -n 1)"
+		max="$(cat /sys/fs/cgroup/pids.max /sys/fs/cgroup/pids/pids.max 2>/dev/null | head -n 1)"
+		threads="$(ls -d /proc/[0-9]*/task/* 2>/dev/null | wc -l)"
+		{
+			echo "$(date -u +%FT%TZ) pids=${cur:-?}/${max:-?} threads=${threads}"
+			cat /proc/[0-9]*/comm 2>/dev/null | sort | uniq -c | sort -rn | head -n 12
+		} >> "$log"
+		tail -n 3000 "$log" > "$log.tmp" 2>/dev/null && mv -f "$log.tmp" "$log"
+		sleep 300
+	done
+}
+if [ "${RESOURCE_WATCH:-1}" != "0" ]; then
+	resource_watch &
+fi
+
 echo "[entrypoint] Starting code-server on [::]:${CS_PORT}"
 
 # Direct bind, password required
