@@ -346,7 +346,7 @@ function readLimit() {
   const limits = readText('/proc/self/limits') || '';
   const m = limits.match(/^Max processes\s+(\S+)/m);
   if (m && /^\d+$/.test(m[1]) && Number(m[1]) > 0) return { n: Number(m[1]), src: 'RLIMIT_NPROC' };
-  return { n: null, src: 'no finite pids.max or RLIMIT_NPROC' };
+  return { n: null, src: 'no finite pids.max or RLIMIT_NPROC visible: unavailable or unlimited' };
 }
 
 function alive(p) {
@@ -402,7 +402,7 @@ async function tick() {
   if (limit.n === null) {
     if (!noLimitLogged) {
       noLimitLogged = true;
-      log(`pressure rule off: no finite pids limit is visible (${limit.src}: unavailable or unlimited); set PID_LIMIT to enable it`);
+      log(`pressure rule off: ${limit.src}; set PID_LIMIT to enable it`);
     }
     // Pressure rule is disabled, so ensure prior pressure state does not remain latched.
     inPressure = false;
@@ -461,4 +461,4 @@ async function main() {
   }
 }
 
-main();
+if (typeof module !== 'undefined' && require.main === module) main();

@@ -12,8 +12,8 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 
 const filename = path.join(__dirname, 'pid-governor.cjs');
-// Load the functions without starting the governor or signalling real processes.
-const source = fs.readFileSync(filename, 'utf8').replace(/\nmain\(\);\s*$/, '\n');
+// main() only runs for the entry point, so loading the source here is inert.
+const source = fs.readFileSync(filename, 'utf8');
 const governor = vm.createContext({ require, process: { env: {}, pid: 99999 } });
 vm.runInContext(source, governor, { filename });
 
