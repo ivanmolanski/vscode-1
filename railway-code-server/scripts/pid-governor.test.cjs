@@ -14,8 +14,25 @@ const vm = require('node:vm');
 const filename = path.join(__dirname, 'pid-governor.cjs');
 // main() only runs for the entry point, so loading the source here is inert.
 const source = fs.readFileSync(filename, 'utf8');
-const governor = vm.createContext({ require, process: { env: {}, pid: 99999 } });
-vm.runInContext(source, governor, { filename });
+
+// Evaluates the script with Node's CommonJS wrapper semantics. `require` delegates
+// to the real one, except `fs` members listed in `fsOverrides`.
+function load(pid = 99999, fsOverrides = {}) {
+	const delegatingRequire = Object.assign(id => {
+		const mod = require(id);
+		return id === 'fs' || id === 'node:fs' ? { ...mod, ...fsOverrides } : mod;
+	}, { main: undefined });
+	const module = { exports: {} };
+	const context = vm.createContext({
+		module, exports: module.exports, require: delegatingRequire,
+		__filename: filename, __dirname: path.dirname(filename),
+		process: { env: {}, pid },
+	});
+	vm.runInContext(source, context, { filename });
+	return context;
+}
+
+const governor = load();
 
 function snapshot(entries) {
 	const procs = new Map(entries.map(([pid, ppid, cmd]) => [pid, {
@@ -161,17 +178,14 @@ test('toArgv keeps empty argv elements and drops only the trailing terminator', 
 });
 
 test('readLimit reports no finite limit for unlimited or zero values', () => {
-	const ctx = vm.createContext({ require: () => ({ readFileSync: p => p.endsWith('pids.max') ? 'max\n' : 'Max processes unlimited unlimited processes\n' }), process: { env: {}, pid: 1 } });
-	vm.runInContext(source, ctx, { filename });
+	const ctx = load(1, { readFileSync: p => p.endsWith('pids.max') ? 'max\n' : 'Max processes unlimited unlimited processes\n' });
 	assert.equal(ctx.readLimit().n, null);
-	const zero = vm.createContext({ require: () => ({ readFileSync: p => p.endsWith('pids.max') ? '0\n' : 'Max processes 0 0 processes\n' }), process: { env: {}, pid: 1 } });
-	vm.runInContext(source, zero, { filename });
+	const zero = load(1, { readFileSync: p => p.endsWith('pids.max') ? '0\n' : 'Max processes 0 0 processes\n' });
 	assert.equal(zero.readLimit().n, null);
 });
 
 test('tick resets pressure state and rate-limits no-limit logs across limit transitions', async () => {
-	const isolated = vm.createContext({ require, process: { env: {}, pid: 99999 } });
-	vm.runInContext(source, isolated, { filename });
+	const isolated = load();
 	const limits = [
 		{ n: 100, src: 'test' },
 		{ n: null, src: 'none' },
