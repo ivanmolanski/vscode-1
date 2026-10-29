@@ -21,6 +21,8 @@ function snapshot(entries) {
 	const procs = new Map(entries.map(([pid, ppid, cmd]) => [pid, {
 		pid, ppid, cmd,
 		cls: governor.isShellCmd(cmd) ? null : governor.classify(cmd),
+		start: '1',
+		ticks: 0,
 		active: 0,
 		orphanSince: null,
 	}]));
@@ -64,6 +66,69 @@ test('standalone servers remain roots through missing parents and shell cycles',
 	]) {
 		assert.deepEqual(rootPids(snapshot([...wrappers, [20, 11, 'node @upstash/context7-mcp']])), [20]);
 	}
+});
+
+test('orphan grace applies through unclassified shell wrappers without classifying them', () => {
+	for (const wrappers of [[], ['sh -c @upstash/context7-mcp'], ['/bin/bash -lc @upstash/context7-mcp', '/bin/sh -c @upstash/context7-mcp']]) {
+		governor.track(snapshot([]), 0);
+		const entries = [[1, 0, 'init']];
+		for (const cmd of wrappers) {
+			entries.push([10 + entries.length, entries.at(-1)[0], cmd]);
+		}
+		entries.push([20, entries.at(-1)[0], 'node @upstash/context7-mcp']);
+		const snap = snapshot(entries);
+		// Exercise both cached shell flags and the command-line fallback.
+		if (wrappers.length === 2) {
+			for (const p of snap.procs.values()) {
+				p.shell = governor.isShellCmd(p.cmd);
+			}
+		}
+		governor.track(snap, 1000);
+		governor.track(snap, 60999);
+		assert.deepEqual(Array.from(snap.procs.values(), p => [p.pid, p.cls, p.orphanSince]), [
+			[1, null, null],
+			...entries.slice(1, -1).map(([pid]) => [pid, null, null]),
+			[20, 'context7', 1000],
+		]);
+		assert.deepEqual(Array.from(governor.alwaysPlan(snap, 60999)), []);
+		governor.track(snap, 61000);
+		assert.deepEqual(Array.from(governor.alwaysPlan(snap, 61000), item => [item.root.pid, item.why]), [[20, 'orphan']]);
+	}
+});
+
+test('orphan ancestry stops at missing, classified, non-shell and visited parents', () => {
+	for (const parents of [
+		[],
+		[[11, 404, 'sh -c @upstash/context7-mcp']],
+		[[11, 1, 'node @upstash/context7-mcp']],
+		[[11, 1, 'node github-mcp-server']],
+		[[11, 1, 'node worker.js']],
+		[[11, 1, 'bash script.sh']],
+		[[11, 1, 'bash']],
+		[[11, 12, 'sh -c x'], [12, 11, 'bash -lc x']],
+		[[11, 11, 'sh -c x']],
+		[[11, 20, 'sh -c x']],
+	]) {
+		governor.track(snapshot([]), 0);
+		const snap = snapshot([...parents, [19, 11, 'sh -c x'], [20, 19, 'node @upstash/context7-mcp']]);
+		governor.track(snap, 1000);
+		assert.equal(snap.procs.get(20).orphanSince, null);
+	}
+});
+
+test('orphan timing resets on attachment and PID reuse', () => {
+	governor.track(snapshot([]), 0);
+	const snap = snapshot([[11, 1, 'sh -c x'], [20, 11, 'node @upstash/context7-mcp']]);
+	const server = snap.procs.get(20);
+	const wrapper = snap.procs.get(11);
+	const observed = [];
+	for (const [now, ppid, start] of [[1000, 1, '1'], [2000, 1, '1'], [3000, 404, '1'], [4000, 1, '1'], [5000, 1, '2']]) {
+		wrapper.ppid = ppid;
+		server.start = start;
+		governor.track(snap, now);
+		observed.push(server.orphanSince);
+	}
+	assert.deepEqual(observed, [1000, 1000, null, 4000, 5000]);
 });
 
 test('duplicate and pressure plans count each wrapped instance once and track child activity', () => {
