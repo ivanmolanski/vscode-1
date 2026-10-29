@@ -340,7 +340,7 @@ async function tick() {
   if (limit.n === null) {
     if (!noLimitLogged) {
       noLimitLogged = true;
-      log('pressure rule off: no finite pids limit is visible (cgroup pids.max and RLIMIT_NPROC are unlimited); set PID_LIMIT to enable it');
+      log(`pressure rule off: no finite pids limit is visible (source: ${limit.src}; may be unavailable or unlimited); set PID_LIMIT to enable it`);
     }
     // Pressure rule is disabled, so ensure prior pressure state does not remain latched.
     inPressure = false;
