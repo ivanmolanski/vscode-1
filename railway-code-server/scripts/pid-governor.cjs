@@ -68,8 +68,8 @@ function classify(cmd) {
 }
 
 // A shell wrapper (bash -c "...") can carry an MCP package name in its
-// arguments without being an MCP server. Its MCP child is still a root because
-// the child's parent is not in the same class, so skipping the shell loses nothing.
+// arguments without being an MCP server. Root selection looks through these
+// wrappers to find a same-class launcher without classifying the shell itself.
 function isShellCmd(cmd) {
   // `/proc/<pid>/cmdline` uses NUL separators; splitting on whitespace changes
   // semantics when an argv element contains spaces. Prefer splitting on NUL first
@@ -227,13 +227,18 @@ function protectedSet(snap) {
   return set;
 }
 
-// Roots: MCP processes whose parent is not in the same class. Each root stands
-// for one server instance, and its subtree is the instance.
+// Roots: MCP processes whose parent, looking through unclassified shell wrappers,
+// is not in the same class. Each root's subtree stands for one server instance.
 function roots(snap) {
   const out = [];
   for (const p of snap.procs.values()) {
     if (!p.cls) continue;
-    const parent = snap.procs.get(p.ppid);
+    let parent = snap.procs.get(p.ppid);
+    const visited = new Set([p.pid]);
+    while (parent && !parent.cls && isShellCmd(parent.cmd) && !visited.has(parent.pid)) {
+      visited.add(parent.pid);
+      parent = snap.procs.get(parent.ppid);
+    }
     if (parent && parent.cls === p.cls) continue;
     out.push(p);
   }
