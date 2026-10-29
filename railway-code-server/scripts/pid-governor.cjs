@@ -7,8 +7,8 @@
 // up: they are orphaned when their client goes away, or left dormant while
 // attached. Every PID_GOVERNOR_INTERVAL seconds this reads /proc and reaps
 // only processes whose command line matches the MCP allowlist below.
-// Editor, daemon (headroom, autossh, privoxy, socat) and shell processes are
-// never matched, whatever their parent.
+// Editor and daemon (headroom, autossh, privoxy, socat) processes are never
+// matched, and neither are `-c` shell wrappers, whatever their parent.
 //
 // Rules, each run once per tick:
 //  1. Orphans: an MCP root whose parent is PID 1 for MCP_ORPHAN_GRACE seconds
@@ -67,30 +67,41 @@ function classify(cmd) {
   return null;
 }
 
+// Splits a cmdline into argv. /proc/<pid>/cmdline is NUL-terminated: empty
+// elements are real arguments, only the final terminator is dropped. Strings
+// without NULs (already joined) fall back to whitespace splitting.
+function toArgv(cmd) {
+  if (Array.isArray(cmd)) return cmd;
+  const s = String(cmd);
+  if (s.indexOf('\0') === -1) return s.trim().split(/\s+/).filter(Boolean);
+  const argv = s.split('\0');
+  if (argv[argv.length - 1] === '') argv.pop();
+  return argv;
+}
+
 // A shell wrapper (bash -c "...") can carry an MCP package name in its
 // arguments without being an MCP server. Root selection looks through these
 // wrappers to find a same-class launcher without classifying the shell itself.
+// Only `-c` invocations count; `bash script.sh` and interactive shells do not.
+// Accepts an argv array or a command string.
 function isShellCmd(cmd) {
-  // `/proc/<pid>/cmdline` uses NUL separators; splitting on whitespace changes
-  // semantics when an argv element contains spaces. Prefer splitting on NUL first
-  // (kernel argv boundaries), and only fall back to whitespace splitting if there
-  // are no NULs (e.g. non-/proc sources).
-  // Only treat shells as "wrappers" when invoked with `-c`-style flags.
-  const s = String(cmd);
-  const argv = (s.indexOf('\0') !== -1)
-    ? s.split('\0').filter(Boolean)
-    : s.trim().split(/\s+/).filter(Boolean);
-
-  const argv0 = argv[0] || '';
-
-  // Login shells commonly prefix argv0 with `-` (e.g. `-bash`).
-  const isShell = /(^|\/)-?(bash|sh|dash|zsh|ash)$/.test(argv0);
-  if (!isShell) return false;
-
-  // Wrapper flags may be combined (`bash -ec`) or separate (`bash -e -c`).
-  for (const arg of argv.slice(1)) {
-    if (!/^-[elic]+$/.test(arg)) return false;
-    if (arg.includes('c')) return true;
+  const argv = toArgv(cmd);
+  // Login shells prefix argv0 with `-` (e.g. `-bash`).
+  if (!/(^|\/)-?(bash|sh|dash|zsh|ash)$/.test(argv[0] || '')) return false;
+  // Scan leading options up to `--` or the first operand. Any short-option
+  // group containing `c` (-c, -lc, -uc, -euxc) makes it a wrapper; long
+  // options (--norc) and other flags may precede it, and `-o`/`-O` take a value.
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--' || !/^[-+]/.test(arg)) return false;
+    if (arg.startsWith('--')) continue;
+    for (const ch of arg.slice(1)) {
+      if (ch === 'c' && arg[0] === '-') return true;
+      if (ch === 'o' || ch === 'O') {
+        i++;
+        break;
+      }
+    }
   }
   return false;
 }
@@ -146,7 +157,12 @@ function readProcs() {
     } catch (e) {
       // exited while scanning
     }
-    const cmd = state === 'Z' ? '' : (readText(`/proc/${pid}/cmdline`) || '').replace(/\0/g, ' ').trim();
+    const argv = state === 'Z' ? [] : toArgv(readText(`/proc/${pid}/cmdline`) || '');
+    const cmd = argv.join(' ').trim();
+    // Cached for roots(); the check exits early unless argv0 is a shell.
+    let cls = state === 'Z' ? null : classify(cmd);
+    const shell = isShellCmd(argv);
+    if (shell) cls = null;
     procs.set(pid, {
       pid,
       state,
@@ -155,7 +171,8 @@ function readProcs() {
       start: f[19],
       tasks,
       cmd,
-      cls: state === 'Z' || isShellCmd(cmd) ? null : classify(cmd),
+      cls,
+      shell,
       active: 0,
       orphanSince: null,
     });
@@ -238,7 +255,7 @@ function roots(snap) {
     if (!p.cls) continue;
     let parent = snap.procs.get(p.ppid);
     const visited = new Set([p.pid]);
-    while (parent && !parent.cls && isShellCmd(parent.cmd) && !visited.has(parent.pid)) {
+    while (parent && !parent.cls && (parent.shell ?? isShellCmd(parent.cmd)) && !visited.has(parent.pid)) {
       visited.add(parent.pid);
       parent = snap.procs.get(parent.ppid);
     }
@@ -269,7 +286,8 @@ function alwaysPlan(snap, now) {
     const withLast = list
       .map((r) => ({ root: r, last: lastActive(snap, r) }))
       .sort((a, b) => b.last - a.last);
-    for (const entry of withLast.slice(CFG.maxPerServer)) {
+    for (let i = CFG.maxPerServer; i < withLast.length; i++) {
+      const entry = withLast[i];
       if (now - entry.last >= CFG.evictIdleMs) {
         out.push({ root: entry.root, why: `duplicate ${cls} beyond ${CFG.maxPerServer}` });
       }
@@ -295,9 +313,10 @@ function readCurrent(snap) {
   return { n: snap.total, src: 'counted' };
 }
 
-// Returns { n: null } when no finite limit is visible (cgroup pids.max and
-// RLIMIT_NPROC both unlimited). The pressure rule is then off; orphan and
-// duplicate reaping still run. PID_LIMIT sets an explicit limit.
+// Returns { n, src }. n is null (src describes why) when no usable finite limit
+// is visible: cgroup pids.max and RLIMIT_NPROC missing, unreadable or unlimited,
+// or reporting 0. The pressure rule is then off; orphan and duplicate reaping
+// still run. PID_LIMIT sets an explicit limit.
 function readLimit() {
   if (CFG.limitOverride > 0) return { n: CFG.limitOverride, src: 'PID_LIMIT' };
   for (const f of ['/sys/fs/cgroup/pids.max', '/sys/fs/cgroup/pids/pids.max']) {
@@ -306,8 +325,8 @@ function readLimit() {
   }
   const limits = readText('/proc/self/limits') || '';
   const m = limits.match(/^Max processes\s+(\S+)/m);
-  if (m && /^\d+$/.test(m[1])) return { n: Number(m[1]), src: 'RLIMIT_NPROC' };
-  return { n: null, src: 'none' };
+  if (m && /^\d+$/.test(m[1]) && Number(m[1]) > 0) return { n: Number(m[1]), src: 'RLIMIT_NPROC' };
+  return { n: null, src: 'no finite pids.max or RLIMIT_NPROC' };
 }
 
 function alive(p) {
@@ -359,18 +378,18 @@ async function tick() {
   for (const item of alwaysPlan(snap, now)) {
     await reap(snap, item.root, item.why);
   }
-  snap = scan();
 
   if (limit.n === null) {
     if (!noLimitLogged) {
       noLimitLogged = true;
-      log(`pressure rule off: no finite pids limit is visible (source: ${limit.src}; may be unavailable or unlimited); set PID_LIMIT to enable it`);
+      log(`pressure rule off: no finite pids limit is visible (${limit.src}: unavailable or unlimited); set PID_LIMIT to enable it`);
     }
     // Pressure rule is disabled, so ensure prior pressure state does not remain latched.
     inPressure = false;
     stuck = false;
     return;
   }
+  snap = scan();
 
   // A finite limit is visible again; allow "pressure rule off" log to re-emit on future transitions.
   noLimitLogged = false;

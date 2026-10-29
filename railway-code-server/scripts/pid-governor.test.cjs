@@ -81,3 +81,25 @@ test('duplicate and pressure plans count each wrapped instance once and track ch
 		pressure: Array.from(governor.pressureCandidates(snap, now), item => item.root.pid),
 	}, { duplicates: [], pressure: [20, 30] });
 });
+
+test('isShellCmd recognizes -c wrapper forms and rejects other shell uses', () => {
+	const wrappers = ['bash -c x', 'bash -uc x', 'bash -euxc x', 'bash -e -c x', 'bash -l -c x', '-bash -c x',
+		'bash --noprofile --norc -c x', 'bash --noprofile -lc x', 'bash -o pipefail -c x', 'bash -O extglob -c x',
+		'/bin/ash -c x', 'bash\0-c\0a b c\0', 'bash\0-e\0-c\0\0'];
+	const others = ['bash', 'bash script.sh', 'bash -- -c x', 'bash -l', 'bash +c x', 'node -c x', 'bash -o -c'];
+	assert.deepEqual(wrappers.filter(c => !governor.isShellCmd(c)), []);
+	assert.deepEqual(others.filter(c => governor.isShellCmd(c)), []);
+});
+
+test('toArgv keeps empty argv elements and drops only the trailing terminator', () => {
+	assert.deepEqual(Array.from(governor.toArgv('bash\0\0-c\0x\0')), ['bash', '', '-c', 'x']);
+});
+
+test('readLimit reports no finite limit for unlimited or zero values', () => {
+	const ctx = vm.createContext({ require: () => ({ readFileSync: p => p.endsWith('pids.max') ? 'max\n' : 'Max processes unlimited unlimited processes\n' }), process: { env: {}, pid: 1 } });
+	vm.runInContext(source, ctx, { filename });
+	assert.equal(ctx.readLimit().n, null);
+	const zero = vm.createContext({ require: () => ({ readFileSync: p => p.endsWith('pids.max') ? '0\n' : 'Max processes 0 0 processes\n' }), process: { env: {}, pid: 1 } });
+	vm.runInContext(source, zero, { filename });
+	assert.equal(zero.readLimit().n, null);
+});
