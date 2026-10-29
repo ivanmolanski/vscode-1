@@ -254,9 +254,9 @@ function alwaysPlan(snap, now) {
     const withLast = list
       .map((r) => ({ root: r, last: lastActive(snap, r) }))
       .sort((a, b) => b.last - a.last);
-    for (const x of withLast.slice(CFG.maxPerServer)) {
-      if (now - x.last >= CFG.evictIdleMs) {
-        out.push({ root: x.root, why: `duplicate ${cls} beyond ${CFG.maxPerServer}` });
+    for (const entry of withLast.slice(CFG.maxPerServer)) {
+      if (now - entry.last >= CFG.evictIdleMs) {
+        out.push({ root: entry.root, why: `duplicate ${cls} beyond ${CFG.maxPerServer}` });
       }
     }
   }
