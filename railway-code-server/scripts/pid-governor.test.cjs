@@ -168,3 +168,32 @@ test('readLimit reports no finite limit for unlimited or zero values', () => {
 	vm.runInContext(source, zero, { filename });
 	assert.equal(zero.readLimit().n, null);
 });
+
+test('tick resets pressure state and rate-limits no-limit logs across limit transitions', async () => {
+	const isolated = vm.createContext({ require, process: { env: {}, pid: 99999 } });
+	vm.runInContext(source, isolated, { filename });
+	const limits = [
+		{ n: 100, src: 'test' },
+		{ n: null, src: 'none' },
+		{ n: null, src: 'none' },
+		{ n: 100, src: 'test' },
+		{ n: null, src: 'none' },
+	];
+	const logs = [];
+	isolated.scan = () => ({ procs: new Map(), total: 80 });
+	isolated.alwaysPlan = () => [];
+	isolated.readLimit = () => limits.shift();
+	isolated.readCurrent = () => ({ n: 80, src: 'test' });
+	isolated.pressureCandidates = () => [];
+	isolated.log = message => logs.push(message);
+
+	for (let i = 0; i < 5; i++) {
+		await isolated.tick();
+	}
+
+	assert.deepEqual({
+		noLimitLogs: logs.filter(message => message.startsWith('pressure rule off')).length,
+		pressureStarts: logs.filter(message => message.startsWith('pressure pids=')).length,
+		stuckLogs: logs.filter(message => message.startsWith('pressure not relieved')).length,
+	}, { noLimitLogs: 2, pressureStarts: 2, stuckLogs: 2 });
+});
