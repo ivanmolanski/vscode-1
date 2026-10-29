@@ -82,14 +82,17 @@ function isShellCmd(cmd) {
     : s.trim().split(/\s+/).filter(Boolean);
 
   const argv0 = argv[0] || '';
-  const argv1 = argv[1] || '';
 
   // Login shells commonly prefix argv0 with `-` (e.g. `-bash`).
   const isShell = /(^|\/)-?(bash|sh|dash|zsh|ash)$/.test(argv0);
   if (!isShell) return false;
 
-  // Wrapper-style shell invocations: `bash -c ...`, `bash -lc ...`, `bash -ic ...`
-  return /^-([lic]*c|c)$/.test(argv1);
+  // Wrapper flags may be combined (`bash -ec`) or separate (`bash -e -c`).
+  for (const arg of argv.slice(1)) {
+    if (!/^-[elic]+$/.test(arg)) return false;
+    if (arg.includes('c')) return true;
+  }
+  return false;
 }
 
 function readText(p) {
