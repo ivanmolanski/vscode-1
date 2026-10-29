@@ -341,8 +341,14 @@ async function tick() {
       noLimitLogged = true;
       log('pressure rule off: no finite pids limit is visible (cgroup pids.max and RLIMIT_NPROC are unlimited); set PID_LIMIT to enable it');
     }
+    // Pressure rule is disabled, so ensure prior pressure state does not remain latched.
+    inPressure = false;
+    stuck = false;
     return;
   }
+
+  // A finite limit is visible again; allow "pressure rule off" log to re-emit on future transitions.
+  noLimitLogged = false;
 
   let cur = readCurrent(snap);
   let pct = (cur.n / limit.n) * 100;
