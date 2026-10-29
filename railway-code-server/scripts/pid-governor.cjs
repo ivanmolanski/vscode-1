@@ -71,9 +71,16 @@ function classify(cmd) {
 // arguments without being an MCP server. Its MCP child is still a root because
 // the child's parent is not in the same class, so skipping the shell loses nothing.
 function isShellCmd(cmd) {
-  // `/proc/<pid>/cmdline` uses NUL separators; allow both whitespace and NUL.
+  // `/proc/<pid>/cmdline` uses NUL separators; splitting on whitespace changes
+  // semantics when an argv element contains spaces. Prefer splitting on NUL first
+  // (kernel argv boundaries), and only fall back to whitespace splitting if there
+  // are no NULs (e.g. non-/proc sources).
   // Only treat shells as "wrappers" when invoked with `-c`-style flags.
-  const argv = String(cmd).trim().split(/[\s\0]+/).filter(Boolean);
+  const s = String(cmd);
+  const argv = (s.indexOf('\0') !== -1)
+    ? s.split('\0').filter(Boolean)
+    : s.trim().split(/\s+/).filter(Boolean);
+
   const argv0 = argv[0] || '';
   const argv1 = argv[1] || '';
 
