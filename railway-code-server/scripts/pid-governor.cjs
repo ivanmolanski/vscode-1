@@ -73,7 +73,8 @@ function classify(cmd) {
 function isShellCmd(cmd) {
   // `/proc/<pid>/cmdline` uses NUL separators; allow both whitespace and NUL.
   const argv0 = String(cmd).trim().split(/[\s\0]+/, 1)[0] || '';
-  return /(^|\/)(bash|sh|dash|zsh)$/.test(argv0);
+  // Login shells commonly prefix argv0 with `-` (e.g. `-bash`).
+  return /(^|\/)-?(bash|sh|dash|zsh|ash)$/.test(argv0);
 }
 
 function readText(p) {
