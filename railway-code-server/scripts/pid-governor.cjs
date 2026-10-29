@@ -160,10 +160,8 @@ function readProcs() {
     }
     const argv = state === 'Z' ? [] : toArgv(readText(`/proc/${pid}/cmdline`) || '');
     const cmd = argv.join(' ').trim();
-    // Cached for roots(); the check exits early unless argv0 is a shell.
-    let cls = state === 'Z' ? null : classify(cmd);
-    const shell = isShellCmd(argv);
-    if (shell) cls = null;
+    const shell = state !== 'Z' && isShellCmd(argv);
+    const cls = state === 'Z' || shell ? null : classify(cmd);
     procs.set(pid, {
       pid,
       state,
@@ -181,26 +179,32 @@ function readProcs() {
   return procs;
 }
 
+// Returns the first ancestor pid outside shell wrappers, or undefined if an
+// ancestor is missing or the chain cycles.
+function walkUpThroughShellWrappers(snap, p) {
+  let parentPid = p.ppid;
+  const visited = new Set([p.pid]);
+  while (parentPid !== 1) {
+    const parent = snap.procs.get(parentPid);
+    if (!parent || visited.has(parent.pid)) {
+      return undefined;
+    }
+    if (parent.cls || !(parent.shell ?? isShellCmd(parent.cmd))) {
+      return parent.pid;
+    }
+    visited.add(parent.pid);
+    parentPid = parent.ppid;
+  }
+  return 1;
+}
+
+function isOrphanedThroughShellWrappers(snap, p) {
+  return !!p.cls && walkUpThroughShellWrappers(snap, p) === 1;
+}
+
 // Last-seen state per process, keyed by pid and starttime so a reused PID is a
 // new process.
 const seen = new Map();
-
-/** Check whether a classified process reaches PID 1 through only shell wrappers. */
-function isOrphan(snap, p) {
-	if (!p.cls) {
-		return false;
-	}
-	const visited = new Set([p.pid]);
-	while (p.ppid !== 1) {
-		const parent = snap.procs.get(p.ppid);
-		if (!parent || parent.cls || !(parent.shell ?? isShellCmd(parent.cmd)) || visited.has(parent.pid)) {
-			return false;
-		}
-		visited.add(parent.pid);
-		p = parent;
-	}
-	return true;
-}
 
 function track(snap, now) {
   const next = new Map();
@@ -210,7 +214,9 @@ function track(snap, now) {
     let active = prev ? prev.active : now;
     if (prev && prev.ticks !== p.ticks) active = now;
     let orphanSince = null;
-    if (isOrphan(snap, p)) orphanSince = prev && prev.orphanSince !== null ? prev.orphanSince : now;
+    if (p.cls && isOrphanedThroughShellWrappers(snap, p)) {
+      orphanSince = prev && prev.orphanSince !== null ? prev.orphanSince : now;
+    }
     next.set(key, { ticks: p.ticks, active, orphanSince });
     p.active = active;
     p.orphanSince = orphanSince;
@@ -271,12 +277,8 @@ function roots(snap) {
   const out = [];
   for (const p of snap.procs.values()) {
     if (!p.cls) continue;
-    let parent = snap.procs.get(p.ppid);
-    const visited = new Set([p.pid]);
-    while (parent && !parent.cls && (parent.shell ?? isShellCmd(parent.cmd)) && !visited.has(parent.pid)) {
-      visited.add(parent.pid);
-      parent = snap.procs.get(parent.ppid);
-    }
+    const parentPid = walkUpThroughShellWrappers(snap, p);
+    const parent = parentPid === undefined ? undefined : snap.procs.get(parentPid);
     if (parent && parent.cls === p.cls) continue;
     out.push(p);
   }
