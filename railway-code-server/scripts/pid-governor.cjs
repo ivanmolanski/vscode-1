@@ -11,8 +11,9 @@
 // matched, and neither are `-c` shell wrappers, whatever their parent.
 //
 // Rules, each run once per tick:
-//  1. Orphans: an MCP root whose parent is PID 1 for MCP_ORPHAN_GRACE seconds
-//     is reaped. Nothing is attached to it any more.
+//  1. Orphans: an MCP root whose ancestry reaches PID 1 through only shell
+//     wrappers for MCP_ORPHAN_GRACE seconds is reaped. Nothing is attached to it
+//     any more.
 //  2. Duplicates: more than MAX_PER_SERVER live roots of one server class are
 //     reaped, least recently active first, once idle for PID_EVICT_IDLE seconds.
 //  3. Pressure: at PID_HIGH_PCT of the limit, attached MCP roots idle for
@@ -184,6 +185,23 @@ function readProcs() {
 // new process.
 const seen = new Map();
 
+/** Check whether a classified process reaches PID 1 through only shell wrappers. */
+function isOrphan(snap, p) {
+	if (!p.cls) {
+		return false;
+	}
+	const visited = new Set([p.pid]);
+	while (p.ppid !== 1) {
+		const parent = snap.procs.get(p.ppid);
+		if (!parent || parent.cls || !(parent.shell ?? isShellCmd(parent.cmd)) || visited.has(parent.pid)) {
+			return false;
+		}
+		visited.add(parent.pid);
+		p = parent;
+	}
+	return true;
+}
+
 function track(snap, now) {
   const next = new Map();
   for (const p of snap.procs.values()) {
@@ -192,7 +210,7 @@ function track(snap, now) {
     let active = prev ? prev.active : now;
     if (prev && prev.ticks !== p.ticks) active = now;
     let orphanSince = null;
-    if (p.cls && p.ppid === 1) orphanSince = prev && prev.orphanSince !== null ? prev.orphanSince : now;
+    if (isOrphan(snap, p)) orphanSince = prev && prev.orphanSince !== null ? prev.orphanSince : now;
     next.set(key, { ticks: p.ticks, active, orphanSince });
     p.active = active;
     p.orphanSince = orphanSince;
