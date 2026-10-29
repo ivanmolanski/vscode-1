@@ -71,7 +71,7 @@ function classify(cmd) {
 // arguments without being an MCP server. Its MCP child is still a root because
 // the child's parent is not in the same class, so skipping the shell loses nothing.
 function isShellCmd(cmd) {
-  const argv0 = cmd.split(' ')[0] || '';
+  const argv0 = String(cmd).trim().split(/\s+/, 1)[0] || '';
   return /(^|\/)(bash|sh|dash|zsh)$/.test(argv0);
 }
 
