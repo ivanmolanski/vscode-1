@@ -72,9 +72,17 @@ function classify(cmd) {
 // the child's parent is not in the same class, so skipping the shell loses nothing.
 function isShellCmd(cmd) {
   // `/proc/<pid>/cmdline` uses NUL separators; allow both whitespace and NUL.
-  const argv0 = String(cmd).trim().split(/[\s\0]+/, 1)[0] || '';
+  // Only treat shells as "wrappers" when invoked with `-c`-style flags.
+  const argv = String(cmd).trim().split(/[\s\0]+/).filter(Boolean);
+  const argv0 = argv[0] || '';
+  const argv1 = argv[1] || '';
+
   // Login shells commonly prefix argv0 with `-` (e.g. `-bash`).
-  return /(^|\/)-?(bash|sh|dash|zsh|ash)$/.test(argv0);
+  const isShell = /(^|\/)-?(bash|sh|dash|zsh|ash)$/.test(argv0);
+  if (!isShell) return false;
+
+  // Wrapper-style shell invocations: `bash -c ...`, `bash -lc ...`, `bash -ic ...`
+  return /^-([lic]*c|c)$/.test(argv1);
 }
 
 function readText(p) {
