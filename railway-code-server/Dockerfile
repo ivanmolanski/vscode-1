@@ -174,6 +174,13 @@ ENV DO_NOT_TRACK=1 \
 	PYTHONUNBUFFERED=1 \
 	BUN_INSTALL=/opt/bun
 
+# Railway caps this container at 1000 PIDs. nproc is 48, and Rust rayon
+# (PostCSS / lightningcss / Tailwind oxide) sizes its pool from that, which
+# crosses the cap and aborts the compile with EAGAIN. 4 threads is enough for
+# those CSS transforms and leaves the editor's own thread pools alone.
+# Override with a service variable of the same name if a larger pool fits.
+ENV RAYON_NUM_THREADS=4
+
 # ---------------------------------------------------------------------------
 # Git defaults - use --system so they apply to EVERY user at runtime, not just
 # root. (--global writes /root/.gitconfig, which the runtime user never reads
