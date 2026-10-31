@@ -95,7 +95,7 @@ export PATH="/config/.local/bin:$PATH"
 # Keep native rayon pools inside the 1000-PID cgroup. The image default is 4;
 # a positive integer Railway variable of the same name still wins. Do not raise UV_THREADPOOL_SIZE:
 # libuv is already 4, and a larger pool spends PIDs without helping this cap.
-if [[ ! ${RAYON_NUM_THREADS:-} =~ ^[0-9]+$ || ! ${RAYON_NUM_THREADS:-} =~ [1-9] ]]; then
+if [[ ! ${RAYON_NUM_THREADS:-} =~ ^[1-9][0-9]*$ ]]; then
 	RAYON_NUM_THREADS=4
 fi
 export RAYON_NUM_THREADS
